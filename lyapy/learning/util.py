@@ -1,6 +1,7 @@
+from cvxpy import Minimize, Variable, Problem, square
 from keras.layers import Add, Dot, Input
 from keras.models import Model
-from numpy import arange, convolve, dot, power, reshape, zeros
+from numpy import arange, array, convolve, dot, power, reshape, zeros
 from numpy.linalg import inv
 
 def connect_models(w, b):
@@ -23,3 +24,44 @@ def differentiator(L, h):
         return convolve(w, xs, 'valid')
 
     return diff
+
+def evaluator(model):
+
+    def f(x):
+        xs = array([x])
+        ys = model.predict(xs)
+        return ys[0]
+
+    return f
+
+def constant_controller(u_0):
+
+    def u_const(x, t):
+        return u_0
+
+    return u_const
+
+def sum_controller(us):
+
+    def u_sum(x, t):
+        return sum([u(x, t) for u in us])
+
+    return u_sum
+
+def augmenting_controller(u, w, b, dV, C):
+    w = evaluator(w)
+    b = evaluator(b)
+
+    def u_aug(x, t):
+        u_c = u(x, t)
+        m = len(u_c)
+        u_l = Variable(m)
+        eps = Variable()
+        obj = Minimize(1 / 2 * (square(u_c + u_l) + C * square(eps)))
+        cons = [w(x) * (u_c + u_l) + b(x) <= dV(x, u_c, t) + eps]
+        prob = Problem(obj, cons)
+        prob.solve()
+        print(t, x, eps.value)
+        return u_l.value
+
+    return u_aug

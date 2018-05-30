@@ -8,11 +8,17 @@ class PendulumController(Controller):
     def __init__(self, pendulum, m_hat, K):
         self.pendulum = Pendulum(m_hat, pendulum.g, pendulum.l)
         self.K = K
-
-    def synthesize(self):
         A = array([[0, 1], -self.K])
         Q = identity(2)
-        P = solve_continuous_lyapunov(A.T, -Q)
+        self.P = solve_continuous_lyapunov(A.T, -Q)
+
+    def LfV(self, x):
+        return 2 * dot(x, dot(self.P, self.pendulum.drift(x)))
+
+    def LgV(self, x):
+        return 2 * dot(x, dot(self.P, self.pendulum.act(x)))
+
+    def synthesize(self):
 
         def u(x, t):
             theta = x[0]
@@ -21,10 +27,10 @@ class PendulumController(Controller):
             return array([1 / LgLf * (-Lf2 - dot(self.K, x))])
 
         def V(x, t):
-            return dot(x, dot(P, x))
+            return dot(x, dot(self.P, x))
 
         def dV(x, u, t):
             x_dot = self.pendulum.drift(x) + dot(self.pendulum.act(x), u)
-            return 2 * dot(x, dot(P, x_dot))
+            return 2 * dot(x, dot(self.P, x_dot))
 
         return u, V, dV
