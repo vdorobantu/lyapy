@@ -1,1 +1,2 @@
+from .adaptive_pendulum_controller import AdaptivePendulumController
 from .pendulum_controller import PendulumController

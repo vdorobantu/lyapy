@@ -58,10 +58,10 @@ def augmenting_controller(u, w, b, dV, C):
         u_l = Variable(m)
         eps = Variable()
         obj = Minimize(1 / 2 * (square(u_c + u_l) + C * square(eps)))
-        cons = [w(x) * (u_c + u_l) + b(x) <= dV(x, u_c, t) + eps]
+        cons = [w(x) * (u_c + u_l) + b(x) <= dV(x, u_c, t) + eps, eps >= 0]
         prob = Problem(obj, cons)
         prob.solve()
-        print(t, x, eps.value)
+        print(t, eps.value)
         return u_l.value
 
     return u_aug

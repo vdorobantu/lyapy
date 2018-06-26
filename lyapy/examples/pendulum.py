@@ -1,10 +1,10 @@
 from keras.layers import Dense
 from keras.models import Sequential
-from keras.optimizers import SGD
 from keras.regularizers import l2
 from matplotlib.pyplot import figure, grid, legend, plot, scatter, show, subplot, suptitle, xlabel, ylabel
 from mpl_toolkits.mplot3d import Axes3D
-from numpy import array, concatenate, linspace, pi, sqrt
+from numpy import array, concatenate, exp, linspace, pi, sqrt
+from numpy.linalg import eigvals
 from numpy.random import rand, randn
 
 from ..controllers import PendulumController
@@ -31,19 +31,19 @@ figure()
 subplot(2, 2, 1)
 plot(ts, xs, linewidth=3)
 grid()
-legend(['$\\theta$', '$\\dot{\\theta}$'])
+legend(['$x_1$', '$x_2$'], fontsize=14)
 subplot(2, 2, 2)
 plot(ts, us, linewidth=3)
 grid()
-legend(['$u$'])
+legend(['$u$'], fontsize=14)
 subplot(2, 2, 3)
 plot(ts, Vs, linewidth=3)
 grid()
-legend(['$V$'])
+legend(['$V$'], fontsize=14)
 subplot(2, 2, 4)
 plot(ts, dV_trues, linewidth=3)
 grid()
-legend(['$\\dot{V}$'])
+legend(['$\\dot{V}$'], fontsize=14)
 suptitle('Nominal control system', fontsize=16)
 
 k, reg = 100, l2(1e-3)
@@ -54,12 +54,9 @@ b = Sequential()
 b.add(Dense(k, input_shape=(2,), kernel_regularizer=reg, activation='relu'))
 b.add(Dense(1, kernel_regularizer=reg))
 model = connect_models(w, b)
+model.compile('adam', 'mean_squared_error')
 
-eta, final_eta, epochs = 4e-2, 4e-3, 1000
-decay = 1 - (final_eta / eta) ** (1 / epochs)
-model.compile(SGD(lr=eta, decay=decay), 'mean_squared_error')
-
-N, sigma, dt = 2000, sqrt(0.1), 1e-2
+N, sigma, dt = 2000, sqrt(0.01), 1e-2
 diff = differentiator(2, dt)
 
 u_0s = [constant_controller(u_0) for u_0 in sigma * randn(N, 1)]
@@ -80,7 +77,7 @@ grid()
 xlabel('$\\theta$', fontsize=16)
 ylabel('$\\dot{\\theta}$', fontsize=16)
 
-model.fit([xs, us], dV_hats, epochs=epochs, batch_size=N // 10, validation_split=0.2)
+model.fit([xs, us], dV_hats, epochs=2000, batch_size=N // 10, validation_split=0.2)
 
 N = 20
 thetas = linspace(-1, 1, N)
@@ -182,24 +179,29 @@ ts, xs = pendulum.simulate(u_aug, x_0, t_eval)
 u_augs = array([u_aug(x, t) for x, t in zip(xs, ts)])
 Vs = array([V(x, t) for x, t in zip(xs, ts)])
 dV_trues = array([dV_true(x, u_aug, t) for x, u_aug, t in zip(xs, u_augs, ts)])
+dVs = array([dV(x, u_aug, t) for x, u_aug, t in zip(xs, u_augs, ts)])
+lambda_1 = max(eigvals(pendulum_controller.P))
+envelope = V(xs[0], ts[0]) * exp(-1 / lambda_1 * ts)
 
 figure()
 subplot(2, 2, 1)
 plot(ts, xs, linewidth=3)
 grid()
-legend(['$\\theta$', '$\\dot{\\theta}$'])
+legend(['$x_1$', '$x_2$'], fontsize=14)
 subplot(2, 2, 2)
 plot(ts, u_augs, linewidth=3)
 grid()
-legend(['$u$'])
+legend(['$u$'], fontsize=14)
 subplot(2, 2, 3)
 plot(ts, Vs, linewidth=3)
+plot(ts, envelope, '--', linewidth=3)
 grid()
-legend(['$V$'])
+legend(['$V$', 'Exp bound'], fontsize=14)
 subplot(2, 2, 4)
 plot(ts, dV_trues, linewidth=3)
+plot(ts, dVs, '--', linewidth=3)
 grid()
-legend(['$\\dot{V}$'])
+legend(['$\\dot{V}$', '$\\dot{V}_d$'], fontsize=14)
 suptitle('Augmented control system', fontsize=16)
 
 show()
