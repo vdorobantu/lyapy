@@ -1,3 +1,19 @@
+"""Minimum norm Control Lypaunov Function (CLF) adaptive controller for inverted pendulum system.
+
+The CLF is
+    V = [psi, psi_dot] * P * [psi, psi_dot]'
+where P is the solution to the Continuous Time Lypaunov Equation (CTLE) under
+the closed loop dynamics for psi and psi_dot with linearizing feedback
+control. The controller is
+    u(psi, psi_dot, theta_hat)
+        = argmin_u 1 / 2 * (u ^ 2)
+          s.t. V_dot(theta, theta_hat, u) < -1 / lambda_1 * V(theta, theta_hat)
+where V_dot(x, u) is the time derivative of the CLF and lambda_1 is the maximum
+eigenvalue of P. Estimator dynamics are
+    theta_hat_dot = gamma * (2 * x' * P * [0, 1 / l ^ 2]')
+where theta_hat_dot is the estimator rate.
+"""
+
 from numpy import array, dot, sin
 from numpy.linalg import eigvals
 
@@ -5,7 +21,15 @@ from .controller import Controller
 from ..systems import AdaptivePendulum
 
 class AdaptivePendulumController(Controller):
+    """Minimum norm Control Lypaunov Function (CLF) adaptive controller for inverted pendulum system."""
+
     def __init__(self, adaptive_pendulum):
+        """Initializes an AdaptivePendulumController object.
+
+        Inputs:
+        Adaptive pendulum system, adaptive_pendulum: AdaptivePendulum
+        """
+        
         self.adaptive_pendulum = adaptive_pendulum
 
     def synthesize(self):

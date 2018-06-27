@@ -1,3 +1,5 @@
+"""Simulation and plotting for inverted pendulum adaptive control system."""
+
 from matplotlib.pyplot import figure, grid, legend, plot, show, subplot
 from numpy import array, concatenate, linspace
 
@@ -11,6 +13,7 @@ adaptive_pendulum = AdaptivePendulum(m, g, l, K, gamma)
 adaptive_pendulum_controller = AdaptivePendulumController(adaptive_pendulum)
 u, _, _ = adaptive_pendulum_controller.synthesize()
 
+# Single simulation
 m_hat = m * 0.8
 x_0 = array([1, 0, 1 / m_hat])
 t_eval = linspace(0, 10, 1e4)
