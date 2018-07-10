@@ -40,20 +40,9 @@ class PendulumController(Controller):
         self.lambda_1 = max(eigvals(self.P))
         self.r, self.r_dot, self.r_ddot = r, r_dot, r_ddot
 
-    def e(self, x, t):
-        """Compute error between state and trajectory, x - [r(t), r_dot(t)].
-
-        Outputs a numpy array (2,).
-
-        Inputs:
-        State, x: numpy array (2,)
-        Time, t: float
-        """
-
-        return x - array([self.r(t), self.r_dot(t)])
-
     def dVdx(self, x, t):
-        return 2 * dot(self.e(x, t), self.P)
+        e = x - array([self.r(t), self.r_dot(t)])
+        return 2 * dot(e, self.P)
 
     def LfV(self, x, t):
         """Compute Lie derivative, L_fV(x) = (dV / dx) * (f(x) - [r_dot(t), r_ddot(t)]).
