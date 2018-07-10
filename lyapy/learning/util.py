@@ -1,27 +1,51 @@
 """Utilities for learning problems"""
 
-from cvxpy import Minimize, Variable, Problem, square
-from keras.layers import Add, Dot, Input
-from keras.models import Model
-from numpy import arange, array, convolve, dot, power, reshape, zeros
-from numpy.linalg import inv
+from keras.layers import Add, Dense, Dot, Dropout, Input, Reshape
+from keras.models import Model, Sequential
+from numpy import arange, array, convolve, dot, power, product, reshape, zeros
+from numpy.linalg import inv, norm
 
-def connect_models(a, b):
-    """Connect two regression models a, b to form h(x, u) = a(x)' * u + b(x).
+def two_layer_nn(d_in, d_hidden, output_shape, dropout_prob=0):
+    """Create a two-layer neural network.
 
-    x is in R^n and u is in R^m. Outputs keras model (R^n * R^m -> R).
+    Uses Rectified Linear Unit (ReLU) nonlinearity. Outputs keras model
+    (R^d_in -> R^output_shape).
 
     Inputs:
-    Regression model, a: keras Sequential model (R^n -> R^m)
-    Regression model, b: keras Sequential model (R^n -> R)
+    Input dimension, d_in: int
+    Hidden layer dimension, d_hidden: int
+    Output shape, output_shape: int tuple
+    Dropout regularization probability, dropout_prob: float
     """
 
-    n, m = a.input_shape[-1], a.output_shape[-1]
-    x, u = Input((n,)), Input((m,))
+    model = Sequential()
+    model.add(Dense(d_hidden, input_shape=(d_in,), activation='relu'))
+    model.add(Dropout(dropout_prob))
+    model.add(Dense(product(output_shape)))
+    model.add(Reshape(output_shape))
+    return model
+
+def connect_models(a, b):
+    """Connect two regression models a, b to form h(x, u) = dVdx * (g(x) * u_l + a(x) * (u_c + u_l) + b(x)).
+
+    x is in R^n and u_c, u_l are in R^m. Outputs keras model
+    (R^n * R^(n * m) * R^n * R^m * R^m -> R).
+
+    Inputs:
+    Regression model, a: keras Sequential model (R^n -> R^(n * m))
+    Regression model, b: keras Sequential model (R^n -> R^n)
+    """
+
+    n, m = a.output_shape[1:3]
+    x, u_c, u_l = Input((n,)), Input((m,)), Input((m,))
+    dVdx, g = Input((n,)), Input((n, m))
     a, b = a(x), b(x)
-    dV_hat = Dot(1)([a, u])
-    dV_hat = Add()([b, dV_hat])
-    model = Model([x, u], dV_hat)
+    gu_l = Dot([2, 1])([g, u_l])
+    u = Add()([u_c, u_l])
+    au = Dot([2, 1])([a, u])
+    sum = Add()([gu_l, au, b])
+    V_dot_r = Dot([1, 1])([dVdx, sum])
+    model = Model([dVdx, g, x, u_c, u_l], V_dot_r)
     return model
 
 def differentiator(L, h):
@@ -67,7 +91,7 @@ def constant_controller(u_0):
     Outputs function mapping numpy array (n,) * float to float.
 
     Inputs:
-    Constant value, u_0: numpy array (n,) * float -> float
+    Constant value, u_0: numpy array (n,)
     """
 
     def u_const(x, t):
@@ -89,16 +113,17 @@ def sum_controller(us):
 
     return u_sum
 
-def augmenting_controller(u, a, b, dV, C):
+def augmenting_controller(dVdx, g, u, a, b, C):
     """Create augmenting controller to enforce Lyapunov function time derivative.
 
     Outputs function mapping numpy array (n,) * float to float.
 
     Inputs:
+    Callable Lyapunov derivative w.r.t x, dVdx: numpy array (n,) * float -> numpy array (n,)
+    Callable actuation matrix, g: numpy array (n,) -> numpy array (n, m)
     Nominal controller, u: numpy array (n,) * float -> float
-    Callable regression model, a: numpy array (n,) -> numpy array (m,)
-    Callable regression model, b: numpy array (n,) -> float
-    Desired Lyapunov function derivative, dV: numpy array (n,) * numpy array (m,) * float -> float
+    Callable regression model, a: numpy array (n,) -> numpy array (n, m)
+    Callable regression model, b: numpy array (n,) -> numpy array (n,)
     Relaxation variable coefficient, C: float
     """
 
@@ -106,15 +131,12 @@ def augmenting_controller(u, a, b, dV, C):
     b = evaluator(b)
 
     def u_aug(x, t):
-        u_c = u(x, t)
-        m = len(u_c)
-        u_l = Variable(m)
-        eps = Variable()
-        obj = Minimize(1 / 2 * (square(u_c + u_l) + C * square(eps)))
-        cons = [a(x) * (u_c + u_l) + b(x) <= dV(x, u_c, t) + eps, eps >= 0]
-        prob = Problem(obj, cons)
-        prob.solve()
-        print(t, eps.value)
-        return u_l.value
+        lambda_r = dot(dVdx(x, t), -dot(g(x), u(x, t)) + b(x)) / (norm(dot(dVdx(x, t), (g(x) + a(x)))) ** 2 + 1 / C)
+        lambda_r = max(0, lambda_r)
+        lambda_plus = 0
+        u_l = -u(x, t) - lambda_r * dot(dVdx(x, t), g(x) + a(x))
+        epsilon = (lambda_r + lambda_plus) / C
+        print(t, epsilon)
+        return u_l
 
     return u_aug

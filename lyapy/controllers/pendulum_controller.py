@@ -1,17 +1,17 @@
 """Minimum norm Control Lypaunov Function (CLF) controller for inverted pendulum system.
 
 The CLF is
-    V = x' * P * x
+    V = (x - x_d(t))' * P * (x - x_d(t))
 where P is the solution to the Continuous Time Lypaunov Equation (CTLE) under
 the closed loop dynamics for theta and theta_dot with linearizing feedback
-control. The controller is
-    u(x) = argmin_u (u ^ 2) / 2 s.t. V_dot(x, u) < -1 / lambda_1(P) * V(x)
-where V_dot(x, u) is the time derivative of the CLF and lamda_1 is the maximum
-eigenvalue of P.
+control, and x_d is a desired trajectory. The controller is
+    u(x) = argmin_u (u ^ 2) / 2 s.t. V_dot(x, u, t) < -1 / lambda_1(P) * V(x, t)
+where V_dot(x, u, t) is the time derivative of the CLF and lamda_1 is the
+maximum eigenvalue of P.
 """
 
 from numpy import array, dot, identity
-from numpy.linalg import eigvals
+from numpy.linalg import eigvals, norm
 from scipy.linalg import solve_continuous_lyapunov
 
 from .controller import Controller
@@ -20,13 +20,16 @@ from ..systems import Pendulum
 class PendulumController(Controller):
     """Minimum norm Control Lypaunov Function (CLF) controller for inverted pendulum system."""
 
-    def __init__(self, pendulum, m_hat, K):
+    def __init__(self, pendulum, m_hat, K, r, r_dot, r_ddot):
         """Initialize a PendulumController object.
 
         Inputs:
         Pendulum object, pendulum: Pendulum
         Estimate of pendulum mass in kg, m_hat: float
         Proportional and derivative contoller coefficients, K: numpy array (2,)
+        Angle trajectory, r: float -> float
+        Angular velocity trajectory, r_dot: float -> float
+        Angular acceleration trajectory, r_ddot: float -> float
         """
 
         self.pendulum = Pendulum(m_hat, pendulum.g, pendulum.l)
@@ -34,44 +37,66 @@ class PendulumController(Controller):
         A = array([[0, 1], -self.K])
         Q = identity(2)
         self.P = solve_continuous_lyapunov(A.T, -Q)
+        self.r, self.r_dot, self.r_ddot = r, r_dot, r_ddot
 
-    def LfV(self, x):
-        """Compute Lie derivative, L_fV(x) = (dV / dx) * f(x).
+    def e(self, x, t):
+        """Compute error between state and trajectory, x - [r(t), r_dot(t)].
+
+        Outputs a numpy array (2,).
+
+        Inputs:
+        State, x: numpy array (2,)
+        Time, t: float
+        """
+
+        return x - array([self.r(t), self.r_dot(t)])
+
+    def dVdx(self, x, t):
+        return 2 * dot(self.e(x, t), self.P)
+
+    def LfV(self, x, t):
+        """Compute Lie derivative, L_fV(x) = (dV / dx) * (f(x) - [r_dot(t), r_ddot(t)]).
 
         Outputs a float.
 
         Inputs:
         State, x: numpy array (2,)
+        Time, t: float
         """
-        
-        return 2 * dot(x, dot(self.P, self.pendulum.drift(x)))
 
+        return dot(self.dVdx(x, t), self.pendulum.drift(x) - array([self.r_dot(t), self.r_ddot(t)]))
 
-    def LgV(self, x):
+    def LgV(self, x, t):
         """Compute Lie derivative, L_gV(x) = (dV / dx) * g(x)
 
         Outputs a float.
 
         Inputs:
         State, x: numpy array (2,)
+        Time, t: float
         """
 
-        return 2 * dot(x, dot(self.P, self.pendulum.act(x)))
+        return dot(self.dVdx(x, t), self.pendulum.act(x))
 
     def synthesize(self):
         lambda_1 = max(eigvals(self.P))
         tol = 1e-6
 
         def V(x, t):
-            return dot(x, dot(self.P, x))
+            e = x - array([self.r(t), self.r_dot(t)])
+            return dot(e, dot(self.P, e))
 
         def u(x, t):
-            if (abs(self.LgV(x)[0]) < tol) or (self.LfV(x) <= -1 / lambda_1 * V(x, t)):
-                return array([0])
-            return array([1 / (self.LgV(x)[0]) * (-self.LfV(x) - 1 / lambda_1 * V(x, t))])
+            LgV = self.LgV(x, t)
+            # Dual optimal solution
+            if norm(LgV) < tol:
+                lambda_star = 0
+            else:
+                lambda_star = (self.LfV(x, t) + V(x, t) / lambda_1) / (norm(LgV) ** 2)
+                lambda_star = max(0, lambda_star)
+            return -lambda_star * LgV
 
         def dV(x, u, t):
-            x_dot = self.pendulum.drift(x) + dot(self.pendulum.act(x), u)
-            return 2 * dot(x, dot(self.P, x_dot))
+            return self.LfV(x, t) + dot(self.LgV(x, t), u)
 
         return u, V, dV
