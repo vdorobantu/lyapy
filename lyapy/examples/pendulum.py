@@ -25,11 +25,11 @@ def r_ddot(t):
     return -(omega ** 2) * r(t)
 
 pendulum_controller = PendulumController(pendulum, m_hat, K, r, r_dot, r_ddot)
-u, V, dV = pendulum_controller.synthesize()
+u, V, dVdx, dV = pendulum_controller.u, pendulum_controller.V, pendulum_controller.dVdx, pendulum_controller.dV
 
 # True Lyapunov function derivative for comparison
 pendulum_controller_true = PendulumController(pendulum, m, K, r, r_dot, r_ddot)
-_, _, dV_true = pendulum_controller_true.synthesize()
+dV_true = pendulum_controller_true.dV
 
 # Single simulation
 x_0 = array([1.5, 0])
@@ -93,7 +93,7 @@ dV_hats = concatenate([diff(array([V(x, t) for x, t in zip(xs, ts)])) for ts, xs
 dV_ds = array([dV(x, u_c + u_l, t) for x, u_c, u_l, t in zip(xs, u_cs, u_ls, ts)])
 dV_r_hats = dV_hats - dV_ds
 
-dVdxs = array([pendulum_controller.dVdx(x, t) for x, t in zip(xs, ts)])
+dVdxs = array([dVdx(x, t) for x, t in zip(xs, ts)])
 gs = array([pendulum.act(x) for x in xs])
 
 figure()
@@ -106,7 +106,7 @@ ylabel('$\\dot{\\theta}$', fontsize=16)
 model.fit([dVdxs, gs, xs, u_cs, u_ls], dV_r_hats, epochs=200, batch_size=N // 10, validation_split=0.5)
 
 C = 1e3
-u_l = augmenting_controller(pendulum_controller.dVdx, pendulum.act, u, a, b, C)
+u_l = augmenting_controller(dVdx, pendulum.act, u, a, b, C)
 u_aug = sum_controller([u, u_l])
 
 # Single simulation

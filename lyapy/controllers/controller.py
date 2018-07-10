@@ -2,21 +2,57 @@
 
 Let n be number of states, m be number of inputs.
 
-Override synthesize.
+Override u, V, dVdx, dV.
 """
 
 class Controller:
     """Base class for controllers."""
 
-    def synthesize(self):
-        """Synthesize controller, Lyapunov function, and Lyapunov function time
-        derivative.
+    def u(self, x, t):
+        """Evaluate the controller.
 
-        Controller maps state and time to input, maps numpy array (n,) * float
-        to numpy array (m,). Lyapunov function maps state and time to scalar,
-        maps numpy array (n,) * float to float. Lyapunov function time
-        derivative maps state, input, and time to scalar, maps numpy array (n,)
-        * numpy array (m,) * float to float.
+        Outputs a numpy array (m,).
+
+        Inputs:
+        State, x: numpy array (n,)
+        Time, t: float
+        """
+
+        pass
+
+    def V(self, x, t):
+        """Evaluate the Lyapunov function.
+
+        Outputs a float.
+
+        Inputs:
+        State, x: numpy array (n,)
+        Time, t: float
+        """
+
+        pass
+
+    def dVdx(self, x, t):
+        """Evaluate the Lyapunov function gradient.
+
+        Outputs a numpy array (n,).
+
+        Inputs:
+        State, x: numpy array (n,)
+        Time, t: float
+        """
+
+        pass
+
+    def dV(self, x, u, t):
+        """Evaluate the Lyapunov function time derivative.
+
+        Outputs a float.
+
+        Inputs:
+        State, x: numpy array (n,)
+        Input, u: numpy array (m,)
+        Time, t: float
         """
 
         pass

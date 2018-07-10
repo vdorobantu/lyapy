@@ -37,6 +37,7 @@ class PendulumController(Controller):
         A = array([[0, 1], -self.K])
         Q = identity(2)
         self.P = solve_continuous_lyapunov(A.T, -Q)
+        self.lambda_1 = max(eigvals(self.P))
         self.r, self.r_dot, self.r_ddot = r, r_dot, r_ddot
 
     def e(self, x, t):
@@ -78,25 +79,20 @@ class PendulumController(Controller):
 
         return dot(self.dVdx(x, t), self.pendulum.act(x))
 
-    def synthesize(self):
-        lambda_1 = max(eigvals(self.P))
+    def u(self, x, t):
         tol = 1e-6
+        LgV = self.LgV(x, t)
+        # Dual optimal solution
+        if norm(LgV) < tol:
+            lambda_star = 0
+        else:
+            lambda_star = (self.LfV(x, t) + self.V(x, t) / self.lambda_1) / (norm(LgV) ** 2)
+            lambda_star = max(0, lambda_star)
+        return -lambda_star * LgV
 
-        def V(x, t):
-            e = x - array([self.r(t), self.r_dot(t)])
-            return dot(e, dot(self.P, e))
+    def V(self, x, t):
+        e = x - array([self.r(t), self.r_dot(t)])
+        return dot(e, dot(self.P, e))
 
-        def u(x, t):
-            LgV = self.LgV(x, t)
-            # Dual optimal solution
-            if norm(LgV) < tol:
-                lambda_star = 0
-            else:
-                lambda_star = (self.LfV(x, t) + V(x, t) / lambda_1) / (norm(LgV) ** 2)
-                lambda_star = max(0, lambda_star)
-            return -lambda_star * LgV
-
-        def dV(x, u, t):
-            return self.LfV(x, t) + dot(self.LgV(x, t), u)
-
-        return u, V, dV
+    def dV(self, x, u, t):
+        return self.LfV(x, t) + dot(self.LgV(x, t), u)

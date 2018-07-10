@@ -119,7 +119,7 @@ def augmenting_controller(dVdx, g, u, a, b, C):
     Outputs function mapping numpy array (n,) * float to float.
 
     Inputs:
-    Callable Lyapunov derivative w.r.t x, dVdx: numpy array (n,) * float -> numpy array (n,)
+    Callable Lyapunov gradient, dVdx: numpy array (n,) * float -> numpy array (n,)
     Callable actuation matrix, g: numpy array (n,) -> numpy array (n, m)
     Nominal controller, u: numpy array (n,) * float -> float
     Callable regression model, a: numpy array (n,) -> numpy array (n, m)
