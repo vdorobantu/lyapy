@@ -90,7 +90,7 @@ u_cs = array([u(x, t) for x, t in zip(xs, ts)])
 u_ls = array([u_l(x, t) for x, u_l, t in zip(xs, u_ls, ts)])
 # Numerically differentiating V for each simulation
 dV_hats = concatenate([diff(array([V(x, t) for x, t in zip(xs, ts)])) for ts, xs in sols])
-dV_ds = array([dV(x, u_c + u_l, t) for x, u_c, u_l, t in zip(xs, u_cs, u_ls, ts)])
+dV_ds = array([dV(x, u_c, t) for x, u_c, u_l, t in zip(xs, u_cs, u_ls, ts)])
 dV_r_hats = dV_hats - dV_ds
 
 dVdxs = array([dVdx(x, t) for x, t in zip(xs, ts)])
