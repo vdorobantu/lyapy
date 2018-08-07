@@ -248,7 +248,7 @@ def runEpisodes(u_c, u_l_prev, u_l_epsilons_prev, a_model, b_model, initialCondi
     gs = array([system.act(x) for x in xs])
 
     # add early stopping, another regularization parameter
-    earlystop = EarlyStopping(monitor='val_loss', min_delta=10, patience=5, verbose=1, mode='auto')
+    earlystop = EarlyStopping(monitor='val_loss', min_delta=0.1, patience=5, verbose=1, mode='auto')
     callbacks_list = [earlystop]
     
     model.fit([dVdxs, gs, xs, u_cs, u_ls], dV_r_hats, epochs=n_epochs, callbacks=callbacks_list, batch_size=len(xs)//10, validation_split=0.5)
