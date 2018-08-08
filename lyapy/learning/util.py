@@ -146,7 +146,7 @@ def augmenting_controller(dVdx, g, u, a, b, C):
 
 def generateRunEp(u_c, initialConditions, system, controller, numdiff, numind, N, sigma, dt, num_timesteps, n_epochs):
     """
-    Learn an augmented controller for a system based on data and/or a learning model from previous episodes
+    Creates a function that learns an augmented controller for a system based on data and/or a learning model from previous episodes
 
     Outputs function mapping
         Previous episodes' learned controller, u_l_prev: numpy array (n,) * float -> numpy array (m,)
@@ -163,9 +163,9 @@ def generateRunEp(u_c, initialConditions, system, controller, numdiff, numind, N
         Newly learned controller, u_l: numpy array (n,) * float -> numpy array (m,)
         Updated learned controllers from previous episodes, u_ls_prev: (numpy array (n, ) * float -> numpy array (m,)) list
         Updated perturbations from previous episodes, epsilons_prev: (numpy array (n, ) * float -> numpy array (m,)) list
-        Updated state space data from previous episodes, xs: numpy array  (N * (i - 1), n)
-        Updated time data from previous episodes, ts:  numpy array (N * (i - 1),)
-        Updated times and corresponding solutions from previous episodes, sols: numpy array (N * (i - 1),) * numpy array (N * (i - 1), n)
+        Updated state space data from previous episodes, xs: numpy array  (N * i, n)
+        Updated time data from previous episodes, ts:  numpy array (N * i,)
+        Updated times and corresponding solutions from previous episodes, sols: numpy array (N * i,) * numpy array (N * i, n)
 
     
     Inputs:
