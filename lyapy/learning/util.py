@@ -5,7 +5,7 @@ from keras.layers import Add, Dense, Dot, Dropout, Input, Reshape
 from keras.models import Model, Sequential
 from numpy import arange, array, concatenate, convolve, dot, pi, power, product, reshape, sin, zeros
 from numpy.linalg import inv, norm
-from numpy.random import rand, randn, uniform
+from numpy.random import uniform
 from random import sample
 
 def two_layer_nn(d_in, d_hidden, output_shape, dropout_prob=0):
