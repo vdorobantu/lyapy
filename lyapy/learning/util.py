@@ -203,7 +203,7 @@ def generateRunEp(u_c, initialConditions, system, controller, numstates, numdiff
     Sample time, dt: float
     Number of timesteps to simulate training data, num_timesteps: int
     Maximum number of epochs to run model, n_epochs: int
-    Conditions specified when creating the random perturbations, randPbConds: float tuple
+    Conditions specified when creating the random perturbations, randPbConds: float * int * float * float
     """
     
     A, num_sinusoids, lowerfb, upperfb = randPbConds
