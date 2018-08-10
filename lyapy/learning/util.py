@@ -3,9 +3,9 @@
 from keras.callbacks import EarlyStopping
 from keras.layers import Add, Dense, Dot, Dropout, Input, Reshape
 from keras.models import Model, Sequential
-from numpy import arange, array, concatenate, convolve, dot, int64, pi, power, product, reshape, sin, zeros
+from numpy import arange, array, concatenate, convolve, dot, pi, power, product, reshape, sin, zeros
 from numpy.linalg import inv, norm
-from numpy.random import rand, randn
+from numpy.random import rand, randn, uniform
 from random import sample
 
 def two_layer_nn(d_in, d_hidden, output_shape, dropout_prob=0):
@@ -102,17 +102,20 @@ def constant_controller(u_0):
 
     return u_const
 
-def random_controller(A, u):
-    """ Create controller that outputs random perturbation proportional to the passed in controller.
+def random_controller(A, num_sinusoids, lowerfb, upperfb, u):
+    """ Creates controller that outputs random perturbation proportional to the passed in controller.
 
     Outputs function mapping numpy array (n,) * float to numpy array (m,).
 
     Inputs:
-    Amplitude of sine waves that make up perturbation, A: float
+    Amplitude of sinusoids, A: float
+    Number of sinusoids added together to create perturbation, num_sinusoids: int
+    Lower bound on freqency of sinusoids, lowerfb: float
+    Upper bound on freqency of sinusoids, upperfb: float
     Controller, u: numpy array (n,) * float -> numpy array (m,).
     """
-    omegas = rand(25) * 1000 * 2 * pi
-    phis = rand(25) * 2 * pi
+    omegas = uniform(lowerfb * 2 * pi, upperfb * 2 * pi, num_sinusoids) 
+    phis = uniform(0, 2*pi, num_sinusoids) 
 
     def u_rand(x, t):
         pert =  sum([A * sin(omega * t + phi) for omega, phi in zip(omegas, phis)])
@@ -163,7 +166,7 @@ def augmenting_controller(dVdx, g, u, a, b, C):
     return u_aug
 
 
-def generateRunEp(u_c, initialConditions, system, controller, numstates, numdiff, numind, N, sigma, dt, num_timesteps, n_epochs):
+def generateRunEp(u_c, initialConditions, system, controller, numstates, numdiff, numind, N, sigma, dt, num_timesteps, n_epochs, randPbConds):
     """
     Creates a function that learns an augmented controller for a system based on data and/or a learning model from previous episodes
 
@@ -200,8 +203,10 @@ def generateRunEp(u_c, initialConditions, system, controller, numstates, numdiff
     Sample time, dt: float
     Number of timesteps to simulate training data, num_timesteps: int
     Maximum number of epochs to run model, n_epochs: int
+    Conditions specified when creating the random perturbations, randPbConds: float tuple
     """
-
+    
+    A, num_sinusoids, lowerfb, upperfb = randPbConds
     V, dVdx, dV = controller.V, controller.dVdx, controller.dV
 
     def runEpisodes(u_l_prev, a_model, b_model, u_ls_prev = [], epsilons_prev = [], existing_xdata = array([]).reshape(0, numstates), existing_tdata = array([]), existing_solsdata = []):
@@ -209,9 +214,8 @@ def generateRunEp(u_c, initialConditions, system, controller, numstates, numdiff
                                                                 # to create training data
         diff = differentiator(numdiff, dt) # Differentiator filter
 
-        A = 0.004
         u_c_l = sum_controller([u_c, u_l_prev])
-        epsilons = [random_controller(A, u_c_l) for idx in range(N)] # generate random perturbations
+        epsilons = [random_controller(A, num_sinusoids, lowerfb, upperfb, u_c_l) for _ in range(N)] # generate random perturbations
         u_augs = [sum_controller([u_c, u_l_prev, epsilon]) for epsilon in epsilons] # Controller + random perturbations
 
         model = connect_models(a_model, b_model) # create model that will output final learned controller
@@ -220,10 +224,10 @@ def generateRunEp(u_c, initialConditions, system, controller, numstates, numdiff
         dataset = [system.simulate(u_aug, x_0, t_eval) for u_aug, x_0, t_eval in zip(u_augs, x_0s, t_evals)] # generate training dataset
             
         # get numind solutions, xs, ts, and perturbations per trajectory 
-        rand_indexes = [sample(range(numdiff - 1, num_timesteps), numind) for idx in range(N)]
+        rand_indexes = [sample(range(numdiff - 1, num_timesteps), numind) for _ in range(N)]
         newxs = [xs[rand_index] for idx, (_, xs) in enumerate(dataset) for rand_index in rand_indexes[idx] ]
         newts = [ts[rand_index] for idx, (ts, _) in enumerate(dataset) for rand_index in rand_indexes[idx] ]
-        neweps = [epsilons[idx] for idx, (_, _) in enumerate(dataset) for rand_index in rand_indexes[idx] ]
+        neweps = [epsilons[idx] for idx, _ in enumerate(dataset) for _ in rand_indexes[idx] ]
         sols = [(ts[rand_index - numdiff + 1:rand_index + 1], xs[rand_index - numdiff + 1:rand_index + 1]) for idx, (ts, xs) in enumerate(dataset) for rand_index in rand_indexes[idx] ]
 
         # append recently generated training data to existing training data if it exists
@@ -234,7 +238,7 @@ def generateRunEp(u_c, initialConditions, system, controller, numstates, numdiff
             
         # add learned controllers to corresponding perturbation
         u_ls_epsilons = [sum_controller([u_l_prev, newep]) for newep in neweps] 
-        u_ls_epsilons_prev = [sum_controller([u_ls_prev[episode], epsilons_prev[episode][traj]]) for episode in range(len(epsilons_prev)) for traj in range(len(epsilons_prev[episode]))]
+        u_ls_epsilons_prev = [sum_controller([u_l_past, epsilon_prev]) for u_l_past, _epsilon_prev in zip(u_ls_prev, epsilons_prev) for epsilon_prev in _epsilon_prev]
         u_ls_epsilons_prev.extend(u_ls_epsilons)
 
         # update list of all learned controllers and perturbations to return
@@ -254,7 +258,7 @@ def generateRunEp(u_c, initialConditions, system, controller, numstates, numdiff
         gs = array([system.act(x) for x in xs])
 
         
-        earlystop = EarlyStopping(monitor='val_loss', min_delta=0.01, patience=5, verbose=1, mode='auto')
+        earlystop = EarlyStopping(monitor='val_loss', min_delta=0.001, patience=5, verbose=1, mode='auto')
         callbacks_list = [earlystop]
     
         model.fit([dVdxs, gs, xs, u_cs, u_ls], dV_r_hats, epochs=n_epochs, callbacks=callbacks_list, batch_size=len(xs)//10, validation_split=0.5)
