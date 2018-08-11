@@ -182,6 +182,7 @@ def generateRunEp(u_c, initialConditions, system, controller, numstates, numdiff
     to
         Updated regression model, a_model: keras Sequential model (R^n -> R^(n * m))
         Updated regression model, b_model: keras Sequential model (R^n -> R^n)
+        Keras model history object, model_history: keras History object
         Newly learned controller, u_l: numpy array (n,) * float -> numpy array (m,)
         Updated learned controllers from previous episodes, u_ls_prev: (numpy array (n, ) * float -> numpy array (m,)) list
         Updated perturbations from previous episodes, epsilons_prev: ((numpy array (n, ) * float -> numpy array (m,)) list) list
@@ -261,7 +262,7 @@ def generateRunEp(u_c, initialConditions, system, controller, numstates, numdiff
         earlystop = EarlyStopping(monitor='val_loss', min_delta=0.001, patience=5, verbose=1, mode='auto')
         callbacks_list = [earlystop]
     
-        model.fit([dVdxs, gs, xs, u_cs, u_ls], dV_r_hats, epochs=n_epochs, callbacks=callbacks_list, batch_size=len(xs)//10, validation_split=0.5)
+        model_history = model.fit([dVdxs, gs, xs, u_cs, u_ls], dV_r_hats, epochs=n_epochs, callbacks=callbacks_list, batch_size=len(xs)//10, validation_split=0.5)
 
         # save recently trained model and its components
         model.save('model.h5')
@@ -271,7 +272,7 @@ def generateRunEp(u_c, initialConditions, system, controller, numstates, numdiff
         C = 1e3
         u_l = augmenting_controller(dVdx, system.act, u_c, a_model, b_model, C)
         
-        return a_model, b_model, u_l, u_ls_prev, epsilons_prev, xs, ts, sols
+        return a_model, b_model, model_history, u_l, u_ls_prev, epsilons_prev, xs, ts, sols
     
     return runEpisodes
 
