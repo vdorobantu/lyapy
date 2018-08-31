@@ -38,6 +38,8 @@ def two_layer_nn(d_in, d_hidden, output_shape, dropout_prob=0):
 def linear_model(d_in, output_shape, val):
     """Create a linear model (a one-layer neural network).
 
+    Uses no activation. Initializes kernel to zero.
+
     Outputs keras model (R^d_in -> R^output_shape).
 
     Inputs:
@@ -72,7 +74,7 @@ def connect_models(a, b):
     model = Model([dVdx, g, x, u_c, u_l], V_dot_r)
     return model
 
-def fix_comp_model(a, b, n, m):
+def sparse_connect_models(a, b, n, m):
     """Connect two regression models a, b to form h(x, u) = dVdx * (g(x) * u_l + a(x) * (u_c + u_l) + b(x))
        after concatenating the output of a and b with the same sized zero arrays.
 
@@ -80,8 +82,8 @@ def fix_comp_model(a, b, n, m):
     (R^n * R^(n * m) * R^n * R^m * R^m -> R).
 
     Inputs:
-    Regression model, a: keras Sequential model (R^n/2 -> R^(n/2 * m))
-    Regression model, b: keras Sequential model (R^n/2 -> R^n/2)
+    Regression model, a: keras Sequential model (R^n -> R^(n/2 * m))
+    Regression model, b: keras Sequential model (R^n -> R^n/2)
     """ 
     x, u_c, u_l = Input((n,)), Input((m,)), Input((m,))
 
@@ -401,7 +403,7 @@ def genRunEpPD(true_sys, true_sys_controller, K_pd, numstates, numdiff, numind, 
         u_pd = pd_controller.u
 
         # compile model to output final augmentations
-        model = fix_comp_model(a_model, b_model, output_model_n, output_model_m)        
+        model = sparse_connect_models(a_model, b_model, output_model_n, output_model_m)        
         model.compile('adam', 'mean_squared_error')
 
         diff = differentiator(numdiff, dt) # Differentiator filter
@@ -437,6 +439,7 @@ def genRunEpPD(true_sys, true_sys_controller, K_pd, numstates, numdiff, numind, 
         dV_ds = array([dV(x, u_c, t) for x, u_c, t in zip(xs, u_cs, ts)])
         # dV_r_hats = dV_hats - dV_ds
 
+        # the method used below to calculate dV_r_hats is a temporary fix
         dV_trues = array([dV_true(x, u_c, t) for x, u_c, t in zip(xs, u_cs, ts)])
         dV_r_hats = dV_trues - dV_ds
         
