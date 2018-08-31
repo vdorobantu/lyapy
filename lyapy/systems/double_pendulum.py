@@ -3,8 +3,8 @@
 System is modeled as 2 point masses, each at the end of a massless rod. These
 rods are connected. Torque input is applied at the opposite end of each rod.
 State x = [theta1, theta2, theta1_dot, theta2_dot]', where
-    theta1 is angle of the first mass of the double inverted pendulum in rad clockwise from upright
-    theta2 is angle of the second mass of the double inverted pendulum in rad clockwise from the angle of the first mass
+    theta1 is angle of the first rod of the double inverted pendulum in rad clockwise from upright
+    theta2 is angle of the second rod of the double inverted pendulum in rad clockwise from the angle of the first mass
     theta1_dot is the angular rate in rad/sec of the first mass of the double inverted pendulum
     theta2_dot is the angular rate in rad/sec of the second mass of the double inverted pendulum
 The first mass is the mass in between the 2 rods, and the second mass is the mass at the end of both the rods.

@@ -27,7 +27,7 @@ class DoublePendulumController(Controller):
         Double Pendulum object, double_pendulum: DoublePendulum
         Estimate of double_pendulum's first mass in kg, m_1_hat: float
         Estimate of double_pendulum's second mass in kg, m_2_hat: float
-        Proportional contoller coefficients, K_p: numpy array (2,2)
+        Proportional contoller coefficients, K_p: numpy array (2, 2)
         Derivative controller coefficient, K_d: numpy array (2, 2)
         Angle trajectory, r: float -> numpy array (2,)
         Angular velocity trajectory, r_dot: float ->  numpy array (2,) 
