@@ -70,7 +70,7 @@ class DoublePendulum(System):
     
     def drift(self, x):
         theta1, theta2, theta1_dot, theta2_dot = x
-        Jinv_G = dot(self.invertJ(self.calcJ(x)), self.calcG(x).T)
+        Jinv_G = dot(self.invertJ(self.calcJ(x)), self.calcG(x))
         return array([theta1_dot, theta2_dot, Jinv_G[0], Jinv_G[1]]) + self.b(x)
 
     def act(self, x):       

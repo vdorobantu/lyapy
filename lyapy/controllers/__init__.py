@@ -8,10 +8,10 @@ PendulumController - Minimum norm Control Lypaunov Function (CLF) controller for
 inverted pendulum system
 DoublePendulumController -Minimum norm Control Lypaunov Function (CLF) controller for
 double inverted pendulum system
-PdController - PD controller for any system
+PDController - PD controller for any system
 """
 
 from .adaptive_pendulum_controller import AdaptivePendulumController
 from .pendulum_controller import PendulumController
 from .double_pendulum_controller import DoublePendulumController
-from .pd_controller import PdController
+from .pd_controller import PDController

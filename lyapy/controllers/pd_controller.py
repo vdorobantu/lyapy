@@ -1,4 +1,10 @@
 """Proportional derivative controller for any system.
+The controller is
+    u(x, t) = -K_p * (x - r(t)) - K_d * (x_dot - r_dot(t))
+where K_p is the proportional controller coefficient,
+K_d is the derivative controller coefficient, and
+r and r_dot are desired trajectories for x and x_dot to
+follow.
 
 """
 
@@ -9,16 +15,16 @@ from scipy.linalg import solve_continuous_lyapunov
 
 from .controller import Controller
 
-class PdController(Controller):
+class PDController(Controller):
     """PD controller for any system."""
 
     def __init__(self, K, r, r_dot):
-        """Initialize a PdController object.
+        """Initialize a PDController object.
 
         Inputs:
-        Proportional and derivative controller coefficients, K: numpy array (n, n/2)
-        Angle trajectory, r: float -> numpy array (n/2,)
-        Angular velocity trajectory, r_dot: float -> numpy array (n/2,)
+        Proportional and derivative controller coefficients, K: numpy array (2n, n)
+        Angle trajectory, r: float -> numpy array (n,)
+        Angular velocity trajectory, r_dot: float -> numpy array (n,)
         """
         self.K = K
         self.r, self.r_dot = r, r_dot
@@ -28,10 +34,10 @@ class PdController(Controller):
 
     def u(self, x, t):
         print(t)
-        nstates = array([self.r(t)]).size
-        e1 = array(x[0:nstates] - self.r(t))
-        e2 = array(x[nstates:2*nstates] - self.r_dot(t))
-        return dot(-self.K[0:nstates], e1) + dot(-self.K[nstates:2*nstates], e2)
+        n = array([self.r(t)]).size
+        e1 = array(x[0:n] - self.r(t))
+        e2 = array(x[n:2*n] - self.r_dot(t))
+        return dot(-self.K[0:n], e1) + dot(-self.K[n:2*n], e2)
 
 
     def V(self, x, t):

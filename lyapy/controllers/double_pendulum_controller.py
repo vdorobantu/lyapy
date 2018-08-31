@@ -5,8 +5,8 @@ The CLF is
 where P is the solution to the Continuous Time Lypaunov Equation (CTLE) under
 the closed loop dynamics for theta1, theta2, theta1_dot, and theta2_dot with linearizing feedback
 control, and x_d is a desired trajectory. The controller is
-    u(x) = argmin_u (u ^ 2) / 2 s.t. V_dot(x, u, t) < -1 / lambda_1(P) * V(x, t)
-where V_dot(x, u, t) is the time derivative of the CLF and lamda_1 is the
+    u(x) = argmin_u norm(u) ^ 2 s.t. V_dot(x, u, t) < -1 / lambda_1(P) * V(x, t)
+where V_dot(x, u, t) is the time derivative of the CLF and lambda_1 is the
 maximum eigenvalue of P.
 """
 
@@ -25,8 +25,8 @@ class DoublePendulumController(Controller):
 
         Inputs:
         Double Pendulum object, double_pendulum: DoublePendulum
-        Estimate of one of the double pendulum's masses in kg, m1_hat: float
-        Estimate of the other double pendulum's mass in kg, m2_hat: float
+        Estimate of double_pendulum's first mass in kg, m_1_hat: float
+        Estimate of double_pendulum's second mass in kg, m_2_hat: float
         Proportional contoller coefficients, K_p: numpy array (2,2)
         Derivative controller coefficient, K_d: numpy array (2, 2)
         Angle trajectory, r: float -> numpy array (2,)
