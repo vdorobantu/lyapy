@@ -1,10 +1,11 @@
 """Proportional derivative controller for any system.
 The controller is
     u(x, t) = -K_p * (x - r(t)) - K_d * (x_dot - r_dot(t))
-where K_p is the proportional controller coefficient,
-K_d is the derivative controller coefficient, and
-r and r_dot are desired trajectories for x and x_dot to
-follow.
+where
+    K_p is the proportional controller coefficient, and is a positive definite matrix
+    K_d is the derivative controller coefficient, and is a positive definite matrix
+    r is the desired trajectories for x to follow
+    r_dot is the desired trajectories for x_dot to follow
 
 """
 
