@@ -1,12 +1,19 @@
 """Utilities for learning problems"""
 
+from keras.initializers import Constant
 from keras.callbacks import EarlyStopping
-from keras.layers import Add, Dense, Dot, Dropout, Input, Reshape
+from keras.layers import Add, Concatenate, Dense, Dot, Dropout, Input, Reshape
 from keras.models import Model, Sequential
-from numpy import arange, array, concatenate, convolve, dot, pi, power, product, reshape, sin, zeros
+from keras.optimizers import SGD
+from keras.regularizers import l1
+from numpy import arange, array, concatenate, convolve, dot, linspace, pi, power, product, reshape, sin, zeros
 from numpy.linalg import inv, norm
 from numpy.random import uniform
 from random import sample
+from scipy.interpolate import interp1d
+from keras.backend import constant
+from ..controllers import PDController
+
 
 def two_layer_nn(d_in, d_hidden, output_shape, dropout_prob=0):
     """Create a two-layer neural network.
@@ -28,6 +35,23 @@ def two_layer_nn(d_in, d_hidden, output_shape, dropout_prob=0):
     model.add(Reshape(output_shape))
     return model
 
+def linear_model(d_in, output_shape, val):
+    """Create a linear model (a one-layer neural network).
+
+    Uses no activation. Initializes kernel to zero.
+
+    Outputs keras model (R^d_in -> R^output_shape).
+
+    Inputs:
+    Input dimension, d_in: int
+    Output shape, output_shape: int tuple
+    Value to initialize layer bias with, val: float
+    """
+    model = Sequential()
+    model.add(Dense(product(output_shape), input_shape=(d_in,), kernel_initializer = Constant(0), bias_initializer = Constant(val)))
+    model.add(Reshape(output_shape))
+    return model
+
 def connect_models(a, b):
     """Connect two regression models a, b to form h(x, u) = dVdx * (g(x) * u_l + a(x) * (u_c + u_l) + b(x)).
 
@@ -37,8 +61,7 @@ def connect_models(a, b):
     Inputs:
     Regression model, a: keras Sequential model (R^n -> R^(n * m))
     Regression model, b: keras Sequential model (R^n -> R^n)
-    """
-
+    """        
     n, m = a.output_shape[1:3]
     x, u_c, u_l = Input((n,)), Input((m,)), Input((m,))
     dVdx, g = Input((n,)), Input((n, m))
@@ -50,6 +73,40 @@ def connect_models(a, b):
     V_dot_r = Dot([1, 1])([dVdx, sum])
     model = Model([dVdx, g, x, u_c, u_l], V_dot_r)
     return model
+
+def sparse_connect_models(a, b, n, m):
+    """Connect two regression models a, b to form h(x, u) = dVdx * (g(x) * u_l + a(x) * (u_c + u_l) + b(x))
+       after concatenating the output of a and b with the same sized zero arrays.
+
+    x is in R^n and u_c, u_l are in R^m. Outputs keras model
+    (R^n * R^(n * m) * R^n * R^m * R^m -> R).
+
+    Inputs:
+    Regression model, a: keras Sequential model (R^n -> R^(n/2 * m))
+    Regression model, b: keras Sequential model (R^n -> R^n/2)
+    """ 
+    x, u_c, u_l = Input((n,)), Input((m,)), Input((m,))
+
+    z_n, z_m = a.output_shape[1:3]    
+    z_a = Input((z_n,z_m))
+    z_b = Input((z_n,))
+    
+    dVdx, g = Input((n,)), Input((n, m))
+    a, b = a(x), b(x)
+
+    a = Concatenate(axis = 1)([z_a, a])
+    b = Concatenate(axis = 1)([z_b, b])
+
+    gu_l = Dot([2, 1])([g, u_l])
+    u = Add()([u_c, u_l])
+
+    au = Dot([2, 1])([a, u])
+    a_sum = Add()([gu_l, au, b])
+    V_dot_r = Dot([1, 1])([dVdx, a_sum])
+    model = Model([dVdx, g, x, u_c, u_l, z_a, z_b], V_dot_r)
+    return model
+    
+    
 
 def differentiator(L, h):
     """Create L-step causal differentiator filter.
@@ -122,6 +179,7 @@ def random_controller(A, num_sinusoids, lowerfb, upperfb, u):
         return u(x, t) * pert
 
     return u_rand
+
 
 def sum_controller(us):
     """Create controller that outputs sum of outputs of a list of controllers.
@@ -278,6 +336,127 @@ def generateRunEp(u_c, initialConditions, system, controller, numstates, numdiff
 
 
 
+def genRunEpPD(true_sys, true_sys_controller, K_pd, numstates, numdiff, numind, N, dt, num_timesteps, n_epochs, randPbConds, output_model_param, z_a_param):
+
+    """
+    Creates a function that learns augmentations to system dynamics based on data and/or a learning model from previous episodes
+
+    Outputs function mapping    
+        System (with estimated parameters) object, est_sys: System
+        Controller (with estimated parameters) object, est_sys_controller: Controller
+        Regression model, a_model: keras Sequential model (R^n -> R^(n * m))
+        Regression model, b_model: keras Sequential model (R^n -> R^n)
+        Learned nominal controllers from previous episodes, u_cs_prev: (numpy array (n, ) * float -> numpy array (m,)) list
+        Perturbations from previous episodes, u_ls_prev: ((numpy array (n,) * float -> numpy array (m,)) list) list
+        State space data from previous episodes, existing_xdata: numpy array  (N * (i - 1), n)
+        Time data from previous episodes, existing_tdata: numpy array (N * (i - 1),)
+        Times and corresponding solutions from previous episodes, existing_solsdata: numpy array (N * (i - 1),) * numpy array (N * (i - 1), n)
+        Initial conditions of trajectory for PD controller to follow, des_traj_ic: numpy array (n,)
+        Initial state space conditions of trajectories generated by PD controller, x_0s: numpy array (N, n)
+        Times corresponding to initial state space conditions of trajectories generated by PD controller, t_evals: numpy array (N,)
+    to    
+        Updated regression model, a_model: keras Sequential model (R^n -> R^(n * m))
+        Updated regression model, b_model: keras Sequential model (R^n -> R^n)
+        Keras model history object, model_history: keras History object
+        Updated learned nominal controllers from previous episodes, u_cs: (numpy array (n, ) * float -> numpy array (m,)) list
+        Updated perturbations from previous episodes, u_ls: ((numpy array (n,) * float -> numpy array (m,)) list) list
+        Updated state space data from previous episodes, xs: numpy array  (N * i, n)
+        Updated time data from previous episodes, ts:  numpy array (N * i,)
+        Updated times and corresponding solutions from previous episodes, sols: numpy array (N * i,) * numpy array (N * i, n)
+
+    
+    Inputs:
+    System (with true values of parameters) object, true_Sys: system
+    Controller (with true values of parameters) object true_sys_controller: Controller
+    Gains of PD Controller, K_pd: numpy array (n, m)
+    Number of states, numstates: int
+    Length of differentiation filter, numdiff: int
+    Number of points per trajectory to be trained on, numind: int
+    Number of trajectories to generate per episode, N: int
+    Sample time, dt: float
+    Number of timesteps to simulate training data, num_timesteps: int
+    Maximum number of epochs to run model, n_epochs: int
+    Conditions specified when creating the random perturbations, randPbConds: float * int * float * float
+    Size of combined model, output_model_param: int * int
+    Size of a_model, z_a_param: int * int
+    """
+    
+    A, num_sinusoids, lowerfb, upperfb = randPbConds
+    timetosim = num_timesteps * dt
+    output_model_n, output_model_m = output_model_param
+    z_n, za_m = z_a_param
+    dV_true = true_sys_controller.dV
+    
+    def runEpisodesPD(est_sys, est_sys_controller, a_model, b_model, u_cs_prev, u_ls_prev, existing_xdata, existing_tdata, existing_solsdata, des_traj_ic, x_0s, t_evals):
+        u_qp, V, dVdx, dV = est_sys_controller.u, est_sys_controller.V, est_sys_controller.dVdx, est_sys_controller.dV
+
+        # Simulate system with uncertain mass to get desired trajectory
+        des_traj_time = linspace(0, timetosim, 1e3)
+        t_ds, x_ds = est_sys.simulate(u_qp, des_traj_ic, des_traj_time)
+
+        # interpolate resulting trajectory to get function
+        r = interp1d(t_ds, x_ds[:, 0:numstates//2], axis=0)
+        r_dot = interp1d(t_ds, x_ds[:, numstates//2:numstates], axis=0)
+
+        # create PD controller
+        pd_controller = PDController(K_pd, r, r_dot)
+        u_pd = pd_controller.u
+
+        # compile model to output final augmentations
+        model = sparse_connect_models(a_model, b_model, output_model_n, output_model_m)        
+        model.compile('adam', 'mean_squared_error')
+
+        diff = differentiator(numdiff, dt) # Differentiator filter
+
+        # add perturbation to PD controller
+        epsilons = [random_controller(A, num_sinusoids, lowerfb, upperfb, u_pd) for _ in range(N)] 
+        u_finals = [sum_controller([u_pd, epsilon]) for epsilon in epsilons]
+
+        # Generate new training data using PD controller    
+        dataset = [true_sys.simulate(u_final, x_0, t_eval) for u_final, x_0, t_eval in zip(u_finals, x_0s, t_evals)]
+        
+        # get all points on trajectory/ corresponding times, epsilons, solutions
+        rand_indexes = [sample(range(numdiff - 1, num_timesteps), numind) for _ in range(N)]
+        newxs = [xs[rand_index] for idx, (_, xs) in enumerate(dataset) for rand_index in rand_indexes[idx] ]
+        newts = [ts[rand_index] for idx, (ts, _) in enumerate(dataset) for rand_index in rand_indexes[idx] ]
+        neweps = [epsilons[idx] for idx, _ in enumerate(dataset) for _ in rand_indexes[idx] ]
+        sols = [(ts[rand_index - numdiff + 1:rand_index + 1], xs[rand_index - numdiff + 1:rand_index + 1]) for idx, (ts, xs) in enumerate(dataset) for rand_index in rand_indexes[idx] ]
+
+        new_u_ls = array([epsilon(x, t) for epsilon, x, t in zip(neweps, newxs, newts)])
+        new_u_cs = array([u_pd(x, t) for _, x, t in zip(neweps, newxs, newts)])
+
+        # append recently generated training data to existing training data if it exists
+        xs = concatenate((existing_xdata, array(newxs)))
+        ts = concatenate((existing_tdata, array(newts)))
+        existing_solsdata.extend(sols)
+        
+        sols = existing_solsdata
+        u_cs = concatenate((u_cs_prev, new_u_cs))
+        u_ls = concatenate((u_ls_prev, new_u_ls))
+        
+        # get data necessary to train model
+        dV_hats = concatenate([diff(array([V(x, t) for x, t in zip(xs, ts)])) for ts, xs in sols])
+        dV_ds = array([dV(x, u_c, t) for x, u_c, t in zip(xs, u_cs, ts)])
+        # dV_r_hats = dV_hats - dV_ds
+
+        # the method used below to calculate dV_r_hats is a temporary fix
+        dV_trues = array([dV_true(x, u_c, t) for x, u_c, t in zip(xs, u_cs, ts)])
+        dV_r_hats = dV_trues - dV_ds
+        
+        dVdxs = array([dVdx(x, t) for x, t in zip(xs, ts)])
+        gs = array([est_sys.act(x) for x in xs])
+
+        z_a = zeros((len(xs), z_n, za_m)) # array to concatenate with output of a_model
+        z_b = zeros((len(xs), z_n)) # array to concatenate with output of b_model
+        model_history = model.fit([dVdxs, gs, xs, u_cs, u_ls, z_a, z_b], dV_r_hats, epochs=n_epochs, batch_size=len(xs), validation_split=0.5)
+
+        # save recently trained model and its components
+        model.save('model.h5')
+        a_model.save('a.h5') 
+        b_model.save('b.h5')
+            
+        return a_model, b_model, model_history, u_cs, u_ls, xs, ts, sols
+    return runEpisodesPD
 
 
     
