@@ -15,3 +15,4 @@ from .adaptive_pendulum_controller import AdaptivePendulumController
 from .pendulum_controller import PendulumController
 from .double_pendulum_controller import DoublePendulumController
 from .pd_controller import PDController
+from .segway_controller import SegwayController
