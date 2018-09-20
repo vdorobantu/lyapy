@@ -8,7 +8,9 @@ from scipy.io import loadmat
 
 from ..controllers import PDController, SegwayController
 from ..systems import Segway
-from ..learning import constant_controller, differentiator, evaluator, interpolate, random_controller, sum_controller, two_layer_nn, principal_scaling_connect_models, principal_scaling_augmenting_controller, weighted_controller
+from ..learning import constant_controller, differentiator, evaluator, interpolate, discrete_random_controller, sum_controller, two_layer_nn, principal_scaling_connect_models, principal_scaling_augmenting_controller, weighted_controller
+
+n, m = 4, 1
 
 m_b_hat, m_w_hat, J_w_hat, c_2_hat, B_2_hat, R_hat, K_hat, r_hat, g, h_hat, m_p_hat = 20.42, 2.539, 0.063, -0.029, 0.578, 0.8796, 1.229, 0.195, 9.81, 0.56, 3.8
 param_hats = array([m_b_hat, m_w_hat, J_w_hat, c_2_hat, B_2_hat, R_hat, K_hat, r_hat, h_hat, m_p_hat])
@@ -38,10 +40,12 @@ dt = 1e-3
 t_eval = [step * dt for step in range((t_span[-1] - t_span[0]) * int(1 / dt))]
 
 t_qps, x_qps = segway_true.simulate(qp_controller.u, x_0, t_eval)
-t_pds, x_pds = segway_true.simulate(pd_controller.u, x_0, t_eval)
+sigma = 1
+u_pd = sum_controller([pd_controller.u, discrete_random_controller(m, sigma, t_eval)])
+t_pds, x_pds = segway_true.simulate(u_pd, x_0, t_eval)
 
 u_qps = array([qp_controller.u(x, t) for x, t in zip(x_qps, t_qps)])
-u_pds = array([pd_controller.u(x, t) for x, t in zip(x_pds, t_pds)])
+u_pds = array([u_pd(x, t) for x, t in zip(x_pds, t_pds)])
 
 int_u_qps = cumsum(abs(u_qps)) * dt
 int_u_pds = cumsum(abs(u_pds)) * dt
@@ -117,22 +121,16 @@ plot(t_qps, int_u_qps, linewidth=2)
 grid()
 legend(['$u_{PD}$', '$u_{QP}$'], fontsize=16)
 
-n, m = 4, 1
 d_hidden = 200
 
 L = 3
 diff = differentiator(L, dt)
 
-num_episodes = 11
-weights = linspace(0, 1, num_episodes)[:-1]
+num_episodes = 20
+weights = linspace(0, 1, num_episodes + 1)[:-1]
 num_trajectories = 1
 num_epochs = 100
-subsample_rate = 1
-
-A = 1e-1
-num_sinusoids = 50
-lowerfb = 10
-upperfb = 100
+subsample_rate = 10
 
 principal_scaling = lambda x, t: norm(qp_controller.dVdx(x, t)[2:])
 alpha = 1 / qp_controller.lambda_1
@@ -157,7 +155,7 @@ for episode, weight in enumerate(weights):
     model.compile('adam', 'mean_squared_error')
 
     u_c = sum_controller([pd_controller.u, weighted_controller(weight, u_aug)])
-    u_ls = [random_controller(A, num_sinusoids, lowerfb, upperfb, u_c) for _ in range(num_trajectories)]
+    u_ls = [discrete_random_controller(m, sigma, t_eval) for _ in range(num_trajectories)]
     us = [sum_controller([u_c, u_l]) for u_l in u_ls]
 
     sols = [segway_true.simulate(u, x_0, t_eval) for u in us]
@@ -188,20 +186,17 @@ for episode, weight in enumerate(weights):
 
     N = len(x_episodes)
 
-    for epoch in range(1, num_epochs + 1):
-        print('EPOCH', epoch)
+    model.fit([dVdx_episodes, g_episodes, principal_scaling_episodes, x_episodes, u_c_episodes, u_l_episodes], V_r_dot_episodes, epochs=num_epochs)
+    a_ests = a.predict(x_episodes)
+    a_ests = array([principal_scaling * a_est for principal_scaling, a_est in zip(principal_scaling_episodes, a_ests)])
+    b_ests = b.predict(x_episodes)[:,0]
+    b_ests = array([principal_scaling * b_est for principal_scaling, b_est in zip(principal_scaling_episodes, b_ests)])
 
-        model.fit([dVdx_episodes, g_episodes, principal_scaling_episodes, x_episodes, u_c_episodes, u_l_episodes], V_r_dot_episodes)
-        a_ests = a.predict(x_episodes)
-        a_ests = array([principal_scaling * a_est for principal_scaling, a_est in zip(principal_scaling_episodes, a_ests)])
-        b_ests = b.predict(x_episodes)[:,0]
-        b_ests = array([principal_scaling * b_est for principal_scaling, b_est in zip(principal_scaling_episodes, b_ests)])
-
-        a_trues = array([dot(dVdx, segway_true.act(x) - segway_est.act(x)) for dVdx, x, in zip(dVdx_episodes, x_episodes)])
-        b_trues = array([dot(dVdx, segway_true.drift(x) - segway_est.drift(x)) for dVdx, x, in zip(dVdx_episodes, x_episodes)])
-        a_mse = norm(a_ests - a_trues, 'fro') ** 2 / (2 * N)
-        b_mse = norm(b_ests - b_trues) ** 2 / (2 * N)
-        print('a_mse', a_mse, 'b_mse', b_mse)
+    a_trues = array([dot(dVdx, segway_true.act(x) - segway_est.act(x)) for dVdx, x, in zip(dVdx_episodes, x_episodes)])
+    b_trues = array([dot(dVdx, segway_true.drift(x) - segway_est.drift(x)) for dVdx, x, in zip(dVdx_episodes, x_episodes)])
+    a_mse = norm(a_ests - a_trues, 'fro') ** 2 / (2 * N)
+    b_mse = norm(b_ests - b_trues) ** 2 / (2 * N)
+    print('a_mse', a_mse, 'b_mse', b_mse)
 
     C = 1e3
     u_aug = principal_scaling_augmenting_controller(pd_controller.u, qp_controller.V, qp_controller.LfV, qp_controller.LgV, qp_controller.dV, principal_scaling, a, b, C, alpha)

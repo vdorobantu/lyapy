@@ -10,11 +10,21 @@ from keras.optimizers import SGD
 from keras.regularizers import l1
 from numpy import arange, array, concatenate, convolve, correlate, dot, linspace, pi, power, product, reshape, sin, where, zeros
 from numpy.linalg import inv, norm, solve
-from numpy.random import uniform
+from numpy.random import uniform, randn
 from random import sample
 from scipy.interpolate import interp1d
 from keras.backend import constant
 from ..controllers import PDController
+
+def discrete_random_controller(m, sigma, t_eval):
+    ts = t_eval[:-1]
+    us = sigma * randn(len(ts), m)
+    u_dict = {t: u for t, u in zip(ts, us)}
+
+    def u_discrete_random(x, t):
+        return u_dict[t]
+
+    return u_discrete_random
 
 def principal_scaling_connect_models(a, b):
     n, m = a.input_shape[-1], a.output_shape[-1]
