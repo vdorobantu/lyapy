@@ -20,21 +20,19 @@ from ..systems import Pendulum
 class PendulumController(Controller):
     """Minimum norm Control Lypaunov Function (CLF) controller for inverted pendulum system."""
 
-    def __init__(self, pendulum, m_hat, K, r, r_dot, r_ddot):
+    def __init__(self, pendulum, K, r, r_dot, r_ddot):
         """Initialize a PendulumController object.
 
         Inputs:
-        Pendulum object, pendulum: Pendulum
-        Estimate of pendulum mass in kg, m_hat: float
+        Estimated pendulum system, pendulum: Pendulum
         Proportional and derivative contoller coefficients, K: numpy array (2,)
         Angle trajectory, r: float -> float
         Angular velocity trajectory, r_dot: float -> float
         Angular acceleration trajectory, r_ddot: float -> float
         """
 
-        self.pendulum = Pendulum(m_hat, pendulum.g, pendulum.l)
-        self.K = K
-        A = array([[0, 1], -self.K])
+        self.pendulum = pendulum
+        A = array([[0, 1], -K])
         Q = identity(2)
         self.P = solve_continuous_lyapunov(A.T, -Q)
         self.lambda_1 = max(eigvals(self.P))
@@ -69,6 +67,7 @@ class PendulumController(Controller):
         return dot(self.dVdx(x, t), self.pendulum.act(x))
 
     def u(self, x, t):
+        print(t)
         tol = 1e-6
         LgV = self.LgV(x, t)
         # Dual optimal solution

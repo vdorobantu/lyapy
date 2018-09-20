@@ -1,18 +1,88 @@
 """Utilities for learning problems"""
 
+from cvxpy import Minimize, Problem, Variable
+from cvxpy import norm as cvx_norm
 from keras.initializers import Constant
 from keras.callbacks import EarlyStopping
 from keras.layers import Add, Concatenate, Dense, Dot, Dropout, Input, Reshape
 from keras.models import Model, Sequential
 from keras.optimizers import SGD
 from keras.regularizers import l1
-from numpy import arange, array, concatenate, convolve, dot, linspace, pi, power, product, reshape, sin, zeros
-from numpy.linalg import inv, norm
+from numpy import arange, array, concatenate, convolve, correlate, dot, linspace, pi, power, product, reshape, sin, where, zeros
+from numpy.linalg import inv, norm, solve
 from numpy.random import uniform
 from random import sample
 from scipy.interpolate import interp1d
 from keras.backend import constant
 from ..controllers import PDController
+
+def principal_scaling_connect_models(a, b):
+    n, m = a.input_shape[-1], a.output_shape[-1]
+
+    x = Input((n,))
+    u_c = Input((m,))
+    u_l = Input((m,))
+    dVdx = Input((n,))
+    g = Input((n, m))
+    principal_scaling = Input((1,))
+
+    a = a(x)
+    b = b(x)
+
+    u = Add()([u_c, u_l])
+    known = Dot([1, 1])([dVdx, Dot([2, 1])([g, u_l])])
+    unknown = Dot([1, 1])([principal_scaling, Add()([Dot([1, 1])([a, u]), b])])
+
+    V_dot_r = Add()([known, unknown])
+
+    return Model([dVdx, g, principal_scaling, x, u_c, u_l], V_dot_r)
+
+def principal_scaling_cvx_augmenting_controller(u, V, LgV, dV, principal_scaling, a, b, alpha):
+    a = evaluator(a)
+    b = evaluator(b)
+
+    C = 1e3
+
+    def u_aug(x, t):
+        u_c = u(x, t)
+        u_l = Variable(u_c.shape)
+        delta = Variable()
+        obj = Minimize(1 / 2 * cvx_norm(u_c + u_l) ** 2 + C * delta ** 2)
+        ps = principal_scaling(x, t)
+        cons = [
+            LgV(x, t) * u_l + ps * (a(x) * (u_c + u_l) + b(x)) + dV(x, u_c, t) + alpha * V(x, t) - delta <= 0,
+            delta >= 0
+        ]
+        prob = Problem(obj, cons)
+        prob.solve()
+        return u_l.value
+
+    return u_aug
+
+def principal_scaling_augmenting_controller(u, V, LfV, LgV, dV, principal_scaling, a, b, C, alpha):
+    a = evaluator(a)
+    b = evaluator(b)
+
+    def u_aug(x, t):
+        u_c = u(x, t)
+
+        lambda_r = (LfV(x, t) + principal_scaling(x, t) * b(x) + alpha * V(x, t)) /  (norm(LgV(x, t) + principal_scaling(x, t) * a(x)) ** 2 + 1 / C)
+        lambda_r = max(0, lambda_r)
+        lambda_plus = 0
+
+        u_l = -u_c - lambda_r * (LgV(x, t) + principal_scaling(x, t) * a(x))
+        delta = 1 / C * (lambda_r + lambda_plus)
+
+        return u_l
+
+    return u_aug
+
+def weighted_controller(weight, u):
+
+    def u_weighted(x, t):
+        return weight * u(x, t)
+
+    return u_weighted
 
 
 def two_layer_nn(d_in, d_hidden, output_shape, dropout_prob=0):
@@ -61,7 +131,7 @@ def connect_models(a, b):
     Inputs:
     Regression model, a: keras Sequential model (R^n -> R^(n * m))
     Regression model, b: keras Sequential model (R^n -> R^n)
-    """        
+    """
     n, m = a.output_shape[1:3]
     x, u_c, u_l = Input((n,)), Input((m,)), Input((m,))
     dVdx, g = Input((n,)), Input((n, m))
@@ -84,13 +154,13 @@ def sparse_connect_models(a, b, n, m):
     Inputs:
     Regression model, a: keras Sequential model (R^n -> R^(n/2 * m))
     Regression model, b: keras Sequential model (R^n -> R^n/2)
-    """ 
+    """
     x, u_c, u_l = Input((n,)), Input((m,)), Input((m,))
 
-    z_n, z_m = a.output_shape[1:3]    
+    z_n, z_m = a.output_shape[1:3]
     z_a = Input((z_n,z_m))
     z_b = Input((z_n,))
-    
+
     dVdx, g = Input((n,)), Input((n, m))
     a, b = a(x), b(x)
 
@@ -105,8 +175,8 @@ def sparse_connect_models(a, b, n, m):
     V_dot_r = Dot([1, 1])([dVdx, a_sum])
     model = Model([dVdx, g, x, u_c, u_l, z_a, z_b], V_dot_r)
     return model
-    
-    
+
+
 
 def differentiator(L, h):
     """Create L-step causal differentiator filter.
@@ -118,16 +188,31 @@ def differentiator(L, h):
     Sample time, h: float
     """
 
-    ks = reshape(arange(L), (L, 1))
-    A = power(ks.T, ks)
-    b = zeros(L)
-    b[1] = -1 / h
-    w = dot(inv(A), b)
+    # ks = reshape(arange(L), (L, 1))
+    # A = power(ks.T, ks)
+    # b = zeros(L)
+    # b[1] = -1 / h
+    # w = dot(inv(A), b)
+    #
+    # def diff(xs):
+    #     return convolve(w, xs, 'valid')
+    #
+    # return diff
+
+    half_L = (L - 1) // 2
+    idxs = arange(-half_L, half_L + 1)
+    pows = arange(0, L)
+    A = array([idxs]) ** array([pows]).T
+    b = zeros((L,))
+    b[1] = 1 / h
+
+    diff_kernel = solve(A, b)
 
     def diff(xs):
-        return convolve(w, xs, 'valid')
+        return correlate(xs, diff_kernel, 'valid')
 
     return diff
+
 
 def evaluator(model):
     """Convert keras model to callable function.
@@ -171,8 +256,8 @@ def random_controller(A, num_sinusoids, lowerfb, upperfb, u):
     Upper bound on freqency of sinusoids, upperfb: float
     Controller, u: numpy array (n,) * float -> numpy array (m,).
     """
-    omegas = uniform(lowerfb * 2 * pi, upperfb * 2 * pi, num_sinusoids) 
-    phis = uniform(0, 2*pi, num_sinusoids) 
+    omegas = uniform(lowerfb * 2 * pi, upperfb * 2 * pi, num_sinusoids)
+    phis = uniform(0, 2*pi, num_sinusoids)
 
     def u_rand(x, t):
         pert =  sum([A * sin(omega * t + phi) for omega, phi in zip(omegas, phis)])
@@ -248,7 +333,7 @@ def generateRunEp(u_c, initialConditions, system, controller, numstates, numdiff
         Updated time data from previous episodes, ts:  numpy array (N * i,)
         Updated times and corresponding solutions from previous episodes, sols: numpy array (N * i,) * numpy array (N * i, n)
 
-    
+
     Inputs:
     Nominal controller, u_c: numpy array (n,) * float -> numpy array (m,)
     Function to generate initial conditions, initialConditions: int * float * int -> numpy array (N,) * numpy array (N, n)
@@ -264,7 +349,7 @@ def generateRunEp(u_c, initialConditions, system, controller, numstates, numdiff
     Maximum number of epochs to run model, n_epochs: int
     Conditions specified when creating the random perturbations, randPbConds: float * int * float * float
     """
-    
+
     A, num_sinusoids, lowerfb, upperfb = randPbConds
     V, dVdx, dV = controller.V, controller.dVdx, controller.dV
 
@@ -281,8 +366,8 @@ def generateRunEp(u_c, initialConditions, system, controller, numstates, numdiff
         model.compile('adam', 'mean_squared_error')
 
         dataset = [system.simulate(u_aug, x_0, t_eval) for u_aug, x_0, t_eval in zip(u_augs, x_0s, t_evals)] # generate training dataset
-            
-        # get numind solutions, xs, ts, and perturbations per trajectory 
+
+        # get numind solutions, xs, ts, and perturbations per trajectory
         rand_indexes = [sample(range(numdiff - 1, num_timesteps), numind) for _ in range(N)]
         newxs = [xs[rand_index] for idx, (_, xs) in enumerate(dataset) for rand_index in rand_indexes[idx] ]
         newts = [ts[rand_index] for idx, (ts, _) in enumerate(dataset) for rand_index in rand_indexes[idx] ]
@@ -294,9 +379,9 @@ def generateRunEp(u_c, initialConditions, system, controller, numstates, numdiff
         ts = concatenate((existing_tdata, array(newts)))
         existing_solsdata.extend(sols)
         sols = existing_solsdata
-            
+
         # add learned controllers to corresponding perturbation
-        u_ls_epsilons = [sum_controller([u_l_prev, newep]) for newep in neweps] 
+        u_ls_epsilons = [sum_controller([u_l_prev, newep]) for newep in neweps]
         u_ls_epsilons_prev = [sum_controller([u_l_past, epsilon_prev]) for u_l_past, _epsilon_prev in zip(u_ls_prev, epsilons_prev) for epsilon_prev in _epsilon_prev]
         u_ls_epsilons_prev.extend(u_ls_epsilons)
 
@@ -307,31 +392,31 @@ def generateRunEp(u_c, initialConditions, system, controller, numstates, numdiff
         # generate all data needed to train neural network
         u_ls = array([u_l_epsilon(x, t) for x, t, u_l_epsilon in zip(xs, ts, u_ls_epsilons_prev)])
         u_cs = array([u_c(x, t) for x, t in zip(xs, ts)])
-        
+
         # Numerically differentiating V for each simulation
         dV_hats = concatenate([diff(array([V(x, t) for x, t in zip(xs, ts)])) for ts, xs in sols])
         dV_ds = array([dV(x, u_c, t) for x, u_c, t in zip(xs, u_cs, ts)])
         dV_r_hats = dV_hats - dV_ds
-        
+
         dVdxs = array([dVdx(x, t) for x, t in zip(xs, ts)])
         gs = array([system.act(x) for x in xs])
 
-        
+
         earlystop = EarlyStopping(monitor='val_loss', min_delta=0.001, patience=5, verbose=1, mode='auto')
         callbacks_list = [earlystop]
-    
+
         model_history = model.fit([dVdxs, gs, xs, u_cs, u_ls], dV_r_hats, epochs=n_epochs, callbacks=callbacks_list, batch_size=len(xs)//10, validation_split=0.5)
 
         # save recently trained model and its components
         model.save('model.h5')
-        a_model.save('a.h5') 
+        a_model.save('a.h5')
         b_model.save('b.h5')
-            
+
         C = 1e3
         u_l = augmenting_controller(dVdx, system.act, u_c, a_model, b_model, C)
-        
+
         return a_model, b_model, model_history, u_l, u_ls_prev, epsilons_prev, xs, ts, sols
-    
+
     return runEpisodes
 
 
@@ -341,7 +426,7 @@ def genRunEpPD(true_sys, true_sys_controller, K_pd, numstates, numdiff, numind, 
     """
     Creates a function that learns augmentations to system dynamics based on data and/or a learning model from previous episodes
 
-    Outputs function mapping    
+    Outputs function mapping
         System (with estimated parameters) object, est_sys: System
         Controller (with estimated parameters) object, est_sys_controller: Controller
         Regression model, a_model: keras Sequential model (R^n -> R^(n * m))
@@ -354,7 +439,7 @@ def genRunEpPD(true_sys, true_sys_controller, K_pd, numstates, numdiff, numind, 
         Initial conditions of trajectory for PD controller to follow, des_traj_ic: numpy array (n,)
         Initial state space conditions of trajectories generated by PD controller, x_0s: numpy array (N, n)
         Times corresponding to initial state space conditions of trajectories generated by PD controller, t_evals: numpy array (N,)
-    to    
+    to
         Updated regression model, a_model: keras Sequential model (R^n -> R^(n * m))
         Updated regression model, b_model: keras Sequential model (R^n -> R^n)
         Keras model history object, model_history: keras History object
@@ -364,7 +449,7 @@ def genRunEpPD(true_sys, true_sys_controller, K_pd, numstates, numdiff, numind, 
         Updated time data from previous episodes, ts:  numpy array (N * i,)
         Updated times and corresponding solutions from previous episodes, sols: numpy array (N * i,) * numpy array (N * i, n)
 
-    
+
     Inputs:
     System (with true values of parameters) object, true_Sys: system
     Controller (with true values of parameters) object true_sys_controller: Controller
@@ -380,13 +465,13 @@ def genRunEpPD(true_sys, true_sys_controller, K_pd, numstates, numdiff, numind, 
     Size of combined model, output_model_param: int * int
     Size of a_model, z_a_param: int * int
     """
-    
+
     A, num_sinusoids, lowerfb, upperfb = randPbConds
     timetosim = num_timesteps * dt
     output_model_n, output_model_m = output_model_param
     z_n, za_m = z_a_param
     dV_true = true_sys_controller.dV
-    
+
     def runEpisodesPD(est_sys, est_sys_controller, a_model, b_model, u_cs_prev, u_ls_prev, existing_xdata, existing_tdata, existing_solsdata, des_traj_ic, x_0s, t_evals):
         u_qp, V, dVdx, dV = est_sys_controller.u, est_sys_controller.V, est_sys_controller.dVdx, est_sys_controller.dV
 
@@ -403,18 +488,18 @@ def genRunEpPD(true_sys, true_sys_controller, K_pd, numstates, numdiff, numind, 
         u_pd = pd_controller.u
 
         # compile model to output final augmentations
-        model = sparse_connect_models(a_model, b_model, output_model_n, output_model_m)        
+        model = sparse_connect_models(a_model, b_model, output_model_n, output_model_m)
         model.compile('adam', 'mean_squared_error')
 
         diff = differentiator(numdiff, dt) # Differentiator filter
 
         # add perturbation to PD controller
-        epsilons = [random_controller(A, num_sinusoids, lowerfb, upperfb, u_pd) for _ in range(N)] 
+        epsilons = [random_controller(A, num_sinusoids, lowerfb, upperfb, u_pd) for _ in range(N)]
         u_finals = [sum_controller([u_pd, epsilon]) for epsilon in epsilons]
 
-        # Generate new training data using PD controller    
+        # Generate new training data using PD controller
         dataset = [true_sys.simulate(u_final, x_0, t_eval) for u_final, x_0, t_eval in zip(u_finals, x_0s, t_evals)]
-        
+
         # get all points on trajectory/ corresponding times, epsilons, solutions
         rand_indexes = [sample(range(numdiff - 1, num_timesteps), numind) for _ in range(N)]
         newxs = [xs[rand_index] for idx, (_, xs) in enumerate(dataset) for rand_index in rand_indexes[idx] ]
@@ -429,11 +514,11 @@ def genRunEpPD(true_sys, true_sys_controller, K_pd, numstates, numdiff, numind, 
         xs = concatenate((existing_xdata, array(newxs)))
         ts = concatenate((existing_tdata, array(newts)))
         existing_solsdata.extend(sols)
-        
+
         sols = existing_solsdata
         u_cs = concatenate((u_cs_prev, new_u_cs))
         u_ls = concatenate((u_ls_prev, new_u_ls))
-        
+
         # get data necessary to train model
         dV_hats = concatenate([diff(array([V(x, t) for x, t in zip(xs, ts)])) for ts, xs in sols])
         dV_ds = array([dV(x, u_c, t) for x, u_c, t in zip(xs, u_cs, ts)])
@@ -442,7 +527,7 @@ def genRunEpPD(true_sys, true_sys_controller, K_pd, numstates, numdiff, numind, 
         # the method used below to calculate dV_r_hats is a temporary fix
         dV_trues = array([dV_true(x, u_c, t) for x, u_c, t in zip(xs, u_cs, ts)])
         dV_r_hats = dV_trues - dV_ds
-        
+
         dVdxs = array([dVdx(x, t) for x, t in zip(xs, ts)])
         gs = array([est_sys.act(x) for x in xs])
 
@@ -452,13 +537,58 @@ def genRunEpPD(true_sys, true_sys_controller, K_pd, numstates, numdiff, numind, 
 
         # save recently trained model and its components
         model.save('model.h5')
-        a_model.save('a.h5') 
+        a_model.save('a.h5')
         b_model.save('b.h5')
-            
+
         return a_model, b_model, model_history, u_cs, u_ls, xs, ts, sols
     return runEpisodesPD
 
+def interpolate(ts, xs, x_dots):
 
-    
+    def interp(t):
+        before = where(ts <= t)[0]
+        after = where(ts > t)[0]
 
+        if len(after) == 0:
+            idx_0 = before[-2]
+            idx_1 = before[-1]
+        else:
+            idx_0 = before[-1]
+            idx_1 = after[0]
 
+        t_0, x_0, x_dot_0 = ts[idx_0], xs[idx_0], x_dots[idx_0]
+        t_1, x_1, x_dot_1 = ts[idx_1], xs[idx_1], x_dots[idx_1]
+
+        A = array([
+            [t_0 ** 3, t_0 ** 2, t_0, 1],
+            [t_1 ** 3, t_1 ** 2, t_1, 1],
+            [3 * (t_0 ** 2), 2 * t_0, 1, 0],
+            [3 * (t_1 ** 2), 2 * t_1, 1, 0]
+        ])
+
+        bs = array([x_0, x_1, x_dot_0, x_dot_1])
+
+        alphas_0 = solve(A, bs)
+        alphas_1 = array([3 * alphas_0[0], 2 * alphas_0[1], alphas_0[2]])
+        alphas_2 = array([2 * alphas_1[0], alphas_1[1]])
+
+        ts_0 = t ** arange(3, -1, -1)
+        ts_1 = ts_0[1:]
+        ts_2 = ts_1[1:]
+
+        x_d = dot(ts_0, alphas_0)
+        x_dot_d = dot(ts_1, alphas_1)
+        x_ddot_d = dot(ts_2, alphas_2)
+
+        return x_d, x_dot_d, x_ddot_d
+
+    def r(t):
+        return interp(t)[0]
+
+    def r_dot(t):
+        return interp(t)[1]
+
+    def r_ddot(t):
+        return interp(t)[2]
+
+    return r, r_dot, r_ddot

@@ -1,4 +1,4 @@
-from numpy import array, dot, identity, zeros
+from numpy import array, dot, identity
 from numpy.linalg import eigvals, norm
 from scipy.linalg import solve_continuous_lyapunov
 

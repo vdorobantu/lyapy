@@ -9,10 +9,8 @@ where
 
 """
 
-from numpy import array, dot, identity, reshape
+from numpy import dot
 from numpy import concatenate
-from numpy.linalg import eigvals, norm
-from scipy.linalg import solve_continuous_lyapunov
 
 from .controller import Controller
 
@@ -23,7 +21,7 @@ class PDController(Controller):
         """Initialize a PDController object.
 
         Inputs:
-        Proportional and derivative controller coefficients, K: numpy array (2n, n)
+        Proportional and derivative controller coefficients, K: numpy array (m, n)
         Angle trajectory, r: float -> numpy array (n,)
         Angular velocity trajectory, r_dot: float -> numpy array (n,)
         """
@@ -34,12 +32,8 @@ class PDController(Controller):
         pass
 
     def u(self, x, t):
-        print(t)
-        n = array([self.r(t)]).size
-        e1 = array(x[0:n] - self.r(t))
-        e2 = array(x[n:2*n] - self.r_dot(t))
-        return dot(-self.K[0:n], e1) + dot(-self.K[n:2*n], e2)
-
+        e = x - concatenate([self.r(t), self.r_dot(t)])
+        return -dot(self.K, e)
 
     def V(self, x, t):
         pass
