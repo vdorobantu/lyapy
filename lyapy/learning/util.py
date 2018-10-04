@@ -8,21 +8,22 @@ from keras.layers import Add, Concatenate, Dense, Dot, Dropout, Input, Reshape
 from keras.models import Model, Sequential
 from keras.optimizers import SGD
 from keras.regularizers import l1
-from numpy import arange, array, concatenate, convolve, correlate, dot, linspace, pi, power, product, reshape, sin, where, zeros
+from numpy import arange, array, concatenate, convolve, correlate, dot, linspace, pi, power, product, reshape, sin, tile, where, zeros
 from numpy.linalg import inv, norm, solve
-from numpy.random import uniform, randn
+from numpy.random import uniform, randn, rand
 from random import sample
 from scipy.interpolate import interp1d
 from keras.backend import constant
 from ..controllers import PDController
 
-def discrete_random_controller(m, sigma, t_eval):
-    ts = t_eval[:-1]
-    us = sigma * randn(len(ts), m)
-    u_dict = {t: u for t, u in zip(ts, us)}
+def discrete_random_controller(u, m, width, t_eval, reps):
+    us = 2 * width * rand(len(t_eval) // reps, m) - width
+    us = reshape(tile(us, reps), (-1, m))
+
+    u_dict = {t: u for t, u in zip(t_eval, us)}
 
     def u_discrete_random(x, t):
-        return u_dict[t]
+        return u_dict[t] * norm(u(x, t))
 
     return u_discrete_random
 
