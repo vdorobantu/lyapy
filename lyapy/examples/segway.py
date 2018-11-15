@@ -9,7 +9,7 @@ from scipy.io import loadmat
 
 from ..controllers import PDController, SegwayController
 from ..systems import Segway
-from ..learning import constant_controller, differentiator, evaluator, interpolate, discrete_random_controller, sum_controller, two_layer_nn, principal_scaling_connect_models, principal_scaling_augmenting_controller, weighted_controller
+from ..learning import constant_controller, differentiator, evaluator, interpolate, discrete_random_controller, sum_controller, two_layer_nn, principal_scaling_connect_models, principal_scaling_augmenting_controller, weighted_controller, fixed_connect_models, fixed_augmenting_controller
 
 n, m = 4, 1
 
@@ -138,12 +138,12 @@ num_pre_train_epochs = 1000
 num_epochs = 1000
 subsample_rate = reps
 
-principal_scaling = lambda x, t: qp_controller.dVdx(x, t)[-1]
+# principal_scaling = lambda x, t: qp_controller.dVdx(x, t)[-1]
 alpha = 1 / qp_controller.lambda_1
 
 dVdx_episodes = zeros((0, n))
 g_episodes = zeros((0, n, m))
-principal_scaling_episodes = zeros((0,))
+# principal_scaling_episodes = zeros((0,))
 x_episodes = zeros((0, n))
 u_c_episodes = zeros((0, m))
 u_l_episodes = zeros((0, m))
@@ -155,22 +155,23 @@ u_compares = []
 t_compares = []
 u_int_compares = []
 
-window = 5
-
-x_lst_sq_episodes = zeros((0, n))
-a_lst_sq_episodes = zeros((0, m))
-b_lst_sq_episodes = zeros((0, 1))
-principal_scaling_lst_sq_episodes = zeros((0,))
-t_lst_sq_episodes = zeros((0,))
+# window = 5
+#
+# x_lst_sq_episodes = zeros((0, n))
+# a_lst_sq_episodes = zeros((0, m))
+# b_lst_sq_episodes = zeros((0, 1))
+# principal_scaling_lst_sq_episodes = zeros((0,))
+# t_lst_sq_episodes = zeros((0,))
 
 u_aug = constant_controller(zeros((m,)))
 
 for episode, weight in enumerate(weights):
     print('EPISODE', episode + 1)
 
-    a = two_layer_nn(n, d_hidden, (m,))
-    b = two_layer_nn(n, d_hidden, (1,))
-    model = principal_scaling_connect_models(a, b)
+    a = two_layer_nn(n + 1, d_hidden, (m,))
+    b = two_layer_nn(n + 1, d_hidden, (1,))
+    # model = principal_scaling_connect_models(a, b)
+    model = fixed_connect_models(a, b, n)
 
     a.compile('adam', 'mean_absolute_error')
     b.compile('adam', 'mean_absolute_error')
@@ -195,66 +196,65 @@ for episode, weight in enumerate(weights):
     V_r_dots = [V_dots - V_d_dots for V_dots, V_d_dots in zip(V_dots, V_d_dots)]
 
     dVdxs = [array([qp_controller.dVdx(x, t) for x, t in zip(xs, ts)]) for xs, ts in zip(xs, ts)]
-    principal_scalings = [array([principal_scaling(x, t) for x, t in zip(xs, ts)]) for xs, ts in zip(xs, ts)]
+    # principal_scalings = [array([principal_scaling(x, t) for x, t in zip(xs, ts)]) for xs, ts in zip(xs, ts)]
 
-    A_lst_sqs = [array([principal_scaling * append(u_c + u_l, 1) for principal_scaling, u_c, u_l in zip(principal_scalings, u_cs, u_ls)]) for principal_scalings, u_cs, u_ls in zip(principal_scalings, u_cs, u_ls)]
-    b_lst_sqs = [array([V_r_dot - dot(qp_controller.LgV(x, t), u_l) for V_r_dot, x, u_l, t in zip(V_r_dots, xs, u_ls, ts)]) for V_r_dots, xs, u_ls, ts in zip(V_r_dots, xs, u_ls, ts)]
+    # A_lst_sqs = [array([principal_scaling * append(u_c + u_l, 1) for principal_scaling, u_c, u_l in zip(principal_scalings, u_cs, u_ls)]) for principal_scalings, u_cs, u_ls in zip(principal_scalings, u_cs, u_ls)]
+    # b_lst_sqs = [array([V_r_dot - dot(qp_controller.LgV(x, t), u_l) for V_r_dot, x, u_l, t in zip(V_r_dots, xs, u_ls, ts)]) for V_r_dots, xs, u_ls, ts in zip(V_r_dots, xs, u_ls, ts)]
+    #
+    # w_lst_sqs = concatenate([array([lstsq(A_lst_sqs[idx:idx+window], b_lst_sqs[idx:idx+window], rcond=None)[0] for idx in range(len(A_lst_sqs) - window + 1)]) for A_lst_sqs, b_lst_sqs in zip(A_lst_sqs, b_lst_sqs)])
+    # a_lst_sqs = w_lst_sqs[:, :-1]
+    # b_lst_sqs = w_lst_sqs[:, -1:]
+    #
+    # half_window = (window - 1) // 2
+    # x_lst_sqs = concatenate([xs[half_window:-half_window] for xs in xs])
+    # principal_scaling_lst_sqs = concatenate([principal_scalings[half_window:-half_window] for principal_scalings in principal_scalings])
+    # t_lst_sqs = concatenate([ts[half_window:-half_window] for ts in ts])
+    #
+    # x_lst_sq_episodes = concatenate([x_lst_sq_episodes, x_lst_sqs])
+    # a_lst_sq_episodes = concatenate([a_lst_sq_episodes, a_lst_sqs])
+    # b_lst_sq_episodes = concatenate([b_lst_sq_episodes, b_lst_sqs])
+    # principal_scaling_lst_sq_episodes = concatenate([principal_scaling_lst_sq_episodes, principal_scaling_lst_sqs])
+    # t_lst_sq_episodes = concatenate([t_lst_sq_episodes, t_lst_sqs])
 
-    w_lst_sqs = concatenate([array([lstsq(A_lst_sqs[idx:idx+window], b_lst_sqs[idx:idx+window], rcond=None)[0] for idx in range(len(A_lst_sqs) - window + 1)]) for A_lst_sqs, b_lst_sqs in zip(A_lst_sqs, b_lst_sqs)])
-    a_lst_sqs = w_lst_sqs[:, :-1]
-    b_lst_sqs = w_lst_sqs[:, -1:]
+    # N = len(x_lst_sq_episodes)
 
-    half_window = (window - 1) // 2
-    x_lst_sqs = concatenate([xs[half_window:-half_window] for xs in xs])
-    principal_scaling_lst_sqs = concatenate([principal_scalings[half_window:-half_window] for principal_scalings in principal_scalings])
-    t_lst_sqs = concatenate([ts[half_window:-half_window] for ts in ts])
+    # a_pre_trues = array([(true_controller.LgV(x, t) - qp_controller.LgV(x, t)) / principal_scaling for x, t, principal_scaling in zip(x_lst_sq_episodes, t_lst_sq_episodes, principal_scaling_lst_sq_episodes)])
+    # b_pre_trues = array([(true_controller.LfV(x, t) - qp_controller.LfV(x, t)) / principal_scaling for x, t, principal_scaling in zip(x_lst_sq_episodes, t_lst_sq_episodes, principal_scaling_lst_sq_episodes)])
 
-    x_lst_sq_episodes = concatenate([x_lst_sq_episodes, x_lst_sqs])
-    a_lst_sq_episodes = concatenate([a_lst_sq_episodes, a_lst_sqs])
-    b_lst_sq_episodes = concatenate([b_lst_sq_episodes, b_lst_sqs])
-    principal_scaling_lst_sq_episodes = concatenate([principal_scaling_lst_sq_episodes, principal_scaling_lst_sqs])
-    t_lst_sq_episodes = concatenate([t_lst_sq_episodes, t_lst_sqs])
-
-    N = len(x_lst_sq_episodes)
-
-    a_pre_trues = array([(true_controller.LgV(x, t) - qp_controller.LgV(x, t)) / principal_scaling for x, t, principal_scaling in zip(x_lst_sq_episodes, t_lst_sq_episodes, principal_scaling_lst_sq_episodes)])
-    b_pre_trues = array([(true_controller.LfV(x, t) - qp_controller.LfV(x, t)) / principal_scaling for x, t, principal_scaling in zip(x_lst_sq_episodes, t_lst_sq_episodes, principal_scaling_lst_sq_episodes)])
-
-    print('Fitting a...')
-    a.fit(x_lst_sq_episodes, a_lst_sq_episodes, epochs=num_pre_train_epochs, batch_size=N, validation_split=0.2)
+    # print('Fitting a...')
+    # a.fit(x_lst_sq_episodes, a_lst_sq_episodes, epochs=num_pre_train_epochs, batch_size=N, validation_split=0.2)
     # a.fit(x_lst_sq_episodes, a_pre_trues, epochs=num_pre_train_epochs, batch_size=N, validation_split=0.2)
-    print('Fitting b...')
-    b.fit(x_lst_sq_episodes, b_lst_sq_episodes, epochs=num_pre_train_epochs, batch_size=N, validation_split=0.2)
+    # print('Fitting b...')
+    # b.fit(x_lst_sq_episodes, b_lst_sq_episodes, epochs=num_pre_train_epochs, batch_size=N, validation_split=0.2)
     # b.fit(x_lst_sq_episodes, b_pre_trues, epochs=num_pre_train_epochs, batch_size=N, validation_split=0.2)
 
-    a_w1, a_b1 = a.layers[0].get_weights()
-    a_w2, a_b2 = a.layers[2].get_weights()
-    b_w1, b_b1 = b.layers[0].get_weights()
-    b_w2, b_b2 = b.layers[2].get_weights()
-
-    print('a layer 1')
-    print(norm(a_w1, 2), norm(a_b1))
-    print('a layer 2')
-    print(norm(a_w2, 2), norm(a_b2))
-    print('b layer 1')
-    print(norm(b_w1, 2), norm(b_b1))
-    print('b layer 2')
-    print(norm(b_w2, 2), norm(b_b2))
-
-
-    a_pre_ests = a.predict(x_lst_sq_episodes)
-    a_pre_ests = array([principal_scaling * a_est for principal_scaling, a_est in zip(principal_scaling_lst_sq_episodes, a_pre_ests)])
-    b_pre_ests = b.predict(x_lst_sq_episodes)[:,0]
-    b_pre_ests = array([principal_scaling * b_est for principal_scaling, b_est in zip(principal_scaling_lst_sq_episodes, b_pre_ests)])
-
-    a_pre_trues = array([true_controller.LgV(x, t) - qp_controller.LgV(x, t) for x, t in zip(x_lst_sq_episodes, t_lst_sq_episodes)])
-    b_pre_trues = array([true_controller.LfV(x, t) - qp_controller.LfV(x, t) for x, t in zip(x_lst_sq_episodes, t_lst_sq_episodes)])
-    a_mse = norm(a_pre_ests - a_pre_trues, 'fro') ** 2 / (2 * N)
-    b_mse = norm(b_pre_ests - b_pre_trues) ** 2 / (2 * N)
-    print('a_mse', a_mse, 'b_mse', b_mse)
+    # a_w1, a_b1 = a.layers[0].get_weights()
+    # a_w2, a_b2 = a.layers[2].get_weights()
+    # b_w1, b_b1 = b.layers[0].get_weights()
+    # b_w2, b_b2 = b.layers[2].get_weights()
+    #
+    # print('a layer 1')
+    # print(norm(a_w1, 2), norm(a_b1))
+    # print('a layer 2')
+    # print(norm(a_w2, 2), norm(a_b2))
+    # print('b layer 1')
+    # print(norm(b_w1, 2), norm(b_b1))
+    # print('b layer 2')
+    # print(norm(b_w2, 2), norm(b_b2))
+    #
+    # a_pre_ests = a.predict(x_lst_sq_episodes)
+    # a_pre_ests = array([principal_scaling * a_est for principal_scaling, a_est in zip(principal_scaling_lst_sq_episodes, a_pre_ests)])
+    # b_pre_ests = b.predict(x_lst_sq_episodes)[:,0]
+    # b_pre_ests = array([principal_scaling * b_est for principal_scaling, b_est in zip(principal_scaling_lst_sq_episodes, b_pre_ests)])
+    #
+    # a_pre_trues = array([true_controller.LgV(x, t) - qp_controller.LgV(x, t) for x, t in zip(x_lst_sq_episodes, t_lst_sq_episodes)])
+    # b_pre_trues = array([true_controller.LfV(x, t) - qp_controller.LfV(x, t) for x, t in zip(x_lst_sq_episodes, t_lst_sq_episodes)])
+    # a_mse = norm(a_pre_ests - a_pre_trues, 'fro') ** 2 / (2 * N)
+    # b_mse = norm(b_pre_ests - b_pre_trues) ** 2 / (2 * N)
+    # print('a_mse', a_mse, 'b_mse', b_mse)
 
     dVdxs = concatenate(dVdxs)
-    principal_scalings = concatenate(principal_scalings)
+    # principal_scalings = concatenate(principal_scalings)
     xs = concatenate(xs)
     u_cs = concatenate(u_cs)
     u_ls = concatenate(u_ls)
@@ -266,45 +266,59 @@ for episode, weight in enumerate(weights):
 
     dVdx_episodes = concatenate([dVdx_episodes, dVdxs])
     g_episodes = concatenate([g_episodes, gs])
-    principal_scaling_episodes = concatenate([principal_scaling_episodes, principal_scalings])
+    # principal_scaling_episodes = concatenate([principal_scaling_episodes, principal_scalings])
     x_episodes = concatenate([x_episodes, xs])
     u_c_episodes = concatenate([u_c_episodes, u_cs])
     u_l_episodes = concatenate([u_l_episodes, u_ls])
     V_r_dot_episodes = concatenate([V_r_dot_episodes, V_r_dots])
     t_episodes = concatenate([t_episodes, ts])
 
+    input_episodes = concatenate([x_episodes, dVdx_episodes[:, -1:]], 1)
+
     N = len(x_episodes)
 
+    a_trues = array([true_controller.LgV(x, t) - qp_controller.LgV(x, t) for x, t in zip(x_episodes, t_episodes)])
+    b_trues = array([true_controller.LfV(x, t) - qp_controller.LfV(x, t) for x, t in zip(x_episodes, t_episodes)])
+
+    print('Pretraining a...')
+    a.fit(input_episodes, a_trues, epochs=num_pre_train_epochs, batch_size=N, validation_split=0.2)
+
+    print('Pretraining b...')
+    b.fit(input_episodes, b_trues, epochs=num_pre_train_epochs, batch_size=N, validation_split=0.2)
+
     print('Fitting V_r_dot...')
-    model.fit([dVdx_episodes, g_episodes, principal_scaling_episodes, x_episodes, u_c_episodes, u_l_episodes], V_r_dot_episodes, epochs=num_epochs, batch_size=N)
+    # model.fit([dVdx_episodes, g_episodes, principal_scaling_episodes, x_episodes, u_c_episodes, u_l_episodes], V_r_dot_episodes, epochs=num_epochs, batch_size=N)
+    model.fit([dVdx_episodes, g_episodes, input_episodes, u_c_episodes, u_l_episodes], V_r_dot_episodes, epochs=num_epochs, batch_size=N)
 
-    a_post_ests = a.predict(x_episodes)
-    a_post_ests = array([principal_scaling * a_est for principal_scaling, a_est in zip(principal_scaling_episodes, a_post_ests)])
-    b_post_ests = b.predict(x_episodes)[:,0]
-    b_post_ests = array([principal_scaling * b_est for principal_scaling, b_est in zip(principal_scaling_episodes, b_post_ests)])
-
-    a_post_trues = array([true_controller.LgV(x, t) - qp_controller.LgV(x, t) for x, t in zip(x_episodes, t_episodes)])
-    b_post_trues = array([true_controller.LfV(x, t) - qp_controller.LfV(x, t) for x, t in zip(x_episodes, t_episodes)])
-    a_mse = norm(a_post_ests - a_post_trues, 'fro') ** 2 / (2 * N)
-    b_mse = norm(b_post_ests - b_post_trues) ** 2 / (2 * N)
-    print('a_mse', a_mse, 'b_mse', b_mse)
-
-    a_w1, a_b1 = a.layers[0].get_weights()
-    a_w2, a_b2 = a.layers[2].get_weights()
-    b_w1, b_b1 = b.layers[0].get_weights()
-    b_w2, b_b2 = b.layers[2].get_weights()
-
-    print('a layer 1')
-    print(norm(a_w1, 2), norm(a_b1))
-    print('a layer 2')
-    print(norm(a_w2, 2), norm(a_b2))
-    print('b layer 1')
-    print(norm(b_w1, 2), norm(b_b1))
-    print('b layer 2')
-    print(norm(b_w2, 2), norm(b_b2))
+    # a_post_ests = a.predict(x_episodes)
+    # a_post_ests = array([principal_scaling * a_est for principal_scaling, a_est in zip(principal_scaling_episodes, a_post_ests)])
+    # b_post_ests = b.predict(x_episodes)[:,0]
+    # b_post_ests = array([principal_scaling * b_est for principal_scaling, b_est in zip(principal_scaling_episodes, b_post_ests)])
+    #
+    # a_post_trues = array([true_controller.LgV(x, t) - qp_controller.LgV(x, t) for x, t in zip(x_episodes, t_episodes)])
+    # b_post_trues = array([true_controller.LfV(x, t) - qp_controller.LfV(x, t) for x, t in zip(x_episodes, t_episodes)])
+    # a_mse = norm(a_post_ests - a_post_trues, 'fro') ** 2 / (2 * N)
+    # b_mse = norm(b_post_ests - b_post_trues) ** 2 / (2 * N)
+    # print('a_mse', a_mse, 'b_mse', b_mse)
+    #
+    # a_w1, a_b1 = a.layers[0].get_weights()
+    # a_w2, a_b2 = a.layers[2].get_weights()
+    # b_w1, b_b1 = b.layers[0].get_weights()
+    # b_w2, b_b2 = b.layers[2].get_weights()
+    #
+    # print('a layer 1')
+    # print(norm(a_w1, 2), norm(a_b1))
+    # print('a layer 2')
+    # print(norm(a_w2, 2), norm(a_b2))
+    # print('b layer 1')
+    # print(norm(b_w1, 2), norm(b_b1))
+    # print('b layer 2')
+    # print(norm(b_w2, 2), norm(b_b2))
 
     C = 1e6
-    u_aug = principal_scaling_augmenting_controller(pd_controller.u, qp_controller.V, qp_controller.LfV, qp_controller.LgV, qp_controller.dV, principal_scaling, a, b, C, alpha)
+    inp = lambda x, t: concatenate([x, qp_controller.dVdx(x, t)[-1:]])
+    u_aug = fixed_augmenting_controller(pd_controller.u, inp, qp_controller.V, qp_controller.LfV, qp_controller.LgV, a, b, C, alpha)
+    # u_aug = principal_scaling_augmenting_controller(pd_controller.u, qp_controller.V, qp_controller.LfV, qp_controller.LgV, qp_controller.dV, principal_scaling, a, b, C, alpha)
 
     ts, xs = segway_true.simulate(u_c, x_0, t_eval)
     us = array([u_c(x, t) for x, t in zip(xs, ts)])
@@ -315,53 +329,53 @@ for episode, weight in enumerate(weights):
     t_compares.append(ts)
     u_int_compares.append(u_ints)
 
-a_lst_sq_episodes = array([a_lst_sq * principal_scaling for a_lst_sq, principal_scaling in zip(a_lst_sq_episodes, principal_scaling_lst_sq_episodes)])
-b_lst_sq_episodes = array([b_lst_sq * principal_scaling for b_lst_sq, principal_scaling in zip(b_lst_sq_episodes, principal_scaling_lst_sq_episodes)])
-
-figure()
-suptitle('$a$ and $b$ least squares estimates', fontsize=16)
-
-subplot(2, 1, 1)
-title('a')
-plot(a_lst_sq_episodes)
-plot(a_pre_trues, '--')
-grid()
-
-subplot(2, 1, 2)
-title('b')
-plot(b_lst_sq_episodes)
-plot(b_pre_trues, '--')
-grid()
-
-figure()
-suptitle('$a$ and $b$ pretrained estimates', fontsize=16)
-
-subplot(2, 1, 1)
-title('a')
-plot(a_pre_ests)
-plot(a_pre_trues, '--')
-grid()
-
-subplot(2, 1, 2)
-title('b')
-plot(b_pre_ests)
-plot(b_pre_trues, '--')
-grid()
-
-figure()
-suptitle('$a$ and $b$ trained estimates', fontsize=16)
-
-subplot(2, 1, 1)
-title('a')
-plot(a_post_ests)
-plot(a_post_trues, '--')
-grid()
-
-subplot(2, 1, 2)
-title('b')
-plot(b_post_ests)
-plot(b_post_trues, '--')
-grid()
+# a_lst_sq_episodes = array([a_lst_sq * principal_scaling for a_lst_sq, principal_scaling in zip(a_lst_sq_episodes, principal_scaling_lst_sq_episodes)])
+# b_lst_sq_episodes = array([b_lst_sq * principal_scaling for b_lst_sq, principal_scaling in zip(b_lst_sq_episodes, principal_scaling_lst_sq_episodes)])
+#
+# figure()
+# suptitle('$a$ and $b$ least squares estimates', fontsize=16)
+#
+# subplot(2, 1, 1)
+# title('a')
+# plot(a_lst_sq_episodes)
+# plot(a_pre_trues, '--')
+# grid()
+#
+# subplot(2, 1, 2)
+# title('b')
+# plot(b_lst_sq_episodes)
+# plot(b_pre_trues, '--')
+# grid()
+#
+# figure()
+# suptitle('$a$ and $b$ pretrained estimates', fontsize=16)
+#
+# subplot(2, 1, 1)
+# title('a')
+# plot(a_pre_ests)
+# plot(a_pre_trues, '--')
+# grid()
+#
+# subplot(2, 1, 2)
+# title('b')
+# plot(b_pre_ests)
+# plot(b_pre_trues, '--')
+# grid()
+#
+# figure()
+# suptitle('$a$ and $b$ trained estimates', fontsize=16)
+#
+# subplot(2, 1, 1)
+# title('a')
+# plot(a_post_ests)
+# plot(a_post_trues, '--')
+# grid()
+#
+# subplot(2, 1, 2)
+# title('b')
+# plot(b_post_ests)
+# plot(b_post_trues, '--')
+# grid()
 
 u = sum_controller([pd_controller.u, u_aug])
 

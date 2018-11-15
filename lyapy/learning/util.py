@@ -16,6 +16,44 @@ from scipy.interpolate import interp1d
 from keras.backend import constant
 from ..controllers import PDController
 
+def fixed_augmenting_controller(u, inp, V, LfV, LgV, a, b, C, alpha):
+    a = evaluator(a)
+    b = evaluator(b)
+
+    def u_aug(x, t):
+        u_c = u(x, t)
+
+        lambda_r = (LfV(x, t) + b(inp(x, t)) + alpha * V(x, t)) / (norm(LgV(x, t) + a(inp(x, t))) ** 2 + 1 / C)
+        lambda_r = max(0, lambda_r)
+        lambda_plus = 0
+
+        u_l = -u_c - lambda_r * (LgV(x, t) + a(inp(x, t)))
+        delta = 1 / C * (lambda_r + lambda_plus)
+
+        return u_l
+
+    return u_aug
+
+def fixed_connect_models(a, b, n):
+    s, m = a.input_shape[-1], a.output_shape[-1]
+
+    input = Input((s,))
+    u_c = Input((m,))
+    u_l = Input((m,))
+    dVdx = Input((n,))
+    g = Input((n, m))
+
+    a = a(input)
+    b = b(input)
+
+    u = Add()([u_c, u_l])
+    known = Dot([1, 1])([dVdx, Dot([2, 1])([g, u_l])])
+    unknown = Add()([Dot([1, 1])([a, u]), b])
+
+    V_dot_r = Add()([known, unknown])
+
+    return Model([dVdx, g, input, u_c, u_l], V_dot_r)
+
 def discrete_random_controller(u, m, width, t_eval, reps):
     us = 2 * width * rand(len(t_eval) // reps, m) - width
     us = reshape(tile(us, reps), (-1, m))
