@@ -39,12 +39,12 @@ pd_controller = PDController(K_pd, r, r_dot)
 
 x_0 = array([2, 0, 0, 0])
 t_span = [0, 5]
-dt = 2e-3
+dt = 1e-3
 t_eval = [step * dt for step in range((t_span[-1] - t_span[0]) * int(1 / dt))]
 
 t_qps, x_qps = segway_true.simulate(qp_controller.u, x_0, t_eval)
 width = 0.1
-reps = 50
+reps = 10
 u_pd = sum_controller([pd_controller.u, discrete_random_controller(pd_controller.u, m, width, t_eval, reps)])
 t_pds, x_pds = segway_true.simulate(u_pd, x_0, t_eval)
 
@@ -125,7 +125,7 @@ plot(t_qps, int_u_qps, linewidth=2)
 grid()
 legend(['$u_{PD}$', '$u_{QP}$'], fontsize=16)
 
-d_hidden = 50
+d_hidden = 200
 
 L = 3
 diff = differentiator(L, dt)
@@ -133,9 +133,10 @@ diff = differentiator(L, dt)
 num_episodes = 10
 # weights = linspace(0, 1, num_episodes + 1)[:-1]
 weights = 1 - linspace(0, 1, num_episodes + 1)[-1:0:-1] ** 2
+# weights = [0]
 num_trajectories = 1
-num_pre_train_epochs = 1000
-num_epochs = 1000
+num_pre_train_epochs = 10000
+num_epochs = 10000
 subsample_rate = reps
 
 # principal_scaling = lambda x, t: qp_controller.dVdx(x, t)[-1]
@@ -281,10 +282,10 @@ for episode, weight in enumerate(weights):
     b_trues = array([true_controller.LfV(x, t) - qp_controller.LfV(x, t) for x, t in zip(x_episodes, t_episodes)])
 
     print('Pretraining a...')
-    a.fit(input_episodes, a_trues, epochs=num_pre_train_epochs, batch_size=N, validation_split=0.2)
+    a.fit(input_episodes, a_trues, epochs=num_pre_train_epochs, batch_size=N)
 
     print('Pretraining b...')
-    b.fit(input_episodes, b_trues, epochs=num_pre_train_epochs, batch_size=N, validation_split=0.2)
+    b.fit(input_episodes, b_trues, epochs=num_pre_train_epochs, batch_size=N)
 
     print('Fitting V_r_dot...')
     # model.fit([dVdx_episodes, g_episodes, principal_scaling_episodes, x_episodes, u_c_episodes, u_l_episodes], V_r_dot_episodes, epochs=num_epochs, batch_size=N)
@@ -377,7 +378,9 @@ for episode, weight in enumerate(weights):
 # plot(b_post_trues, '--')
 # grid()
 
+# TODO: Remove this weighted thing
 u = sum_controller([pd_controller.u, u_aug])
+# u = sum_controller([pd_controller.u, weighted_controller(0.1, u_aug)])
 
 ts, xs = segway_true.simulate(u, x_0, t_eval)
 us = array([u(x, t) for x, t in zip(xs, ts)])
@@ -387,6 +390,26 @@ x_compares.append(xs)
 u_compares.append(us)
 t_compares.append(ts)
 u_int_compares.append(u_ints)
+
+a_ests = a.predict(input_episodes)
+b_ests = b.predict(input_episodes)
+
+figure()
+suptitle('Debug', fontsize=16)
+
+subplot(2, 1, 1)
+plot(a_ests, linewidth=2)
+plot(a_trues, '--', linewidth=2)
+grid()
+legend(['Estimated', 'True'], fontsize=16)
+title('a', fontsize=16)
+
+subplot(2, 1, 2)
+plot(b_ests, linewidth=2)
+plot(b_trues, '--', linewidth=2)
+grid()
+legend(['Estimated', 'True'], fontsize=16)
+title('b', fontsize=16)
 
 figure()
 suptitle('Augmented Controller', fontsize=16)
