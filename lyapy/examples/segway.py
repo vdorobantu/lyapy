@@ -2,7 +2,7 @@ from keras.layers import Add, Dot, Input
 from keras.models import Model
 from matplotlib.animation import FuncAnimation
 from matplotlib.pyplot import figure, grid, legend, plot, show, subplot, suptitle, title
-from numpy import append, argsort, array, concatenate, cumsum, dot, linspace, max, min, reshape, sign, split, zeros
+from numpy import append, argsort, array, concatenate, cumsum, dot, exp, linspace, max, min, reshape, sign, split, zeros
 from numpy.linalg import norm, lstsq
 from numpy.random import rand
 from scipy.io import loadmat
@@ -135,8 +135,8 @@ num_episodes = 10
 weights = 1 - linspace(0, 1, num_episodes + 1)[-1:0:-1] ** 2
 # weights = [0]
 num_trajectories = 1
-num_pre_train_epochs = 10000
-num_epochs = 10000
+num_pre_train_epochs = 5000
+num_epochs = 5000
 subsample_rate = reps
 
 # principal_scaling = lambda x, t: qp_controller.dVdx(x, t)[-1]
@@ -185,16 +185,20 @@ for episode, weight in enumerate(weights):
     sols = [segway_true.simulate(u, x_0, t_eval) for u in us]
 
     Vs = [array([qp_controller.V(x, t) for x, t in zip(xs, ts)]) for ts, xs in sols]
-    V_dots = [diff(Vs)[::subsample_rate] for Vs in Vs]
+    # TODO: FIX THIS
+    # V_dots = [diff(Vs)[::subsample_rate] for Vs in Vs]
 
     half_L = (L - 1) // 2
     xs = [xs[half_L:-half_L:subsample_rate] for _, xs in sols]
     ts = [ts[half_L:-half_L:subsample_rate] for ts, _ in sols]
     u_cs = [array([u_c(x, t) for x, t in zip(xs, ts)]) for xs, ts in zip(xs, ts)]
     u_ls = [array([u_l(x, t) for x, t in zip(xs, ts)]) for xs, ts, u_l in zip(xs, ts, u_ls)]
+    # TODO: FIX THIS TOO
+    V_dots = [array([true_controller.dV(x, u_c + u_l, t) for x, u_c, u_l, t in zip(xs, u_cs, u_ls, ts)]) for xs, u_cs, u_ls, ts in zip(xs, u_cs, u_ls, ts)]
 
     V_d_dots = [array([qp_controller.dV(x, u_c, t) for x, u_c, t in zip(xs, u_cs, ts)]) for xs, u_cs, ts in zip(xs, u_cs, ts)]
     V_r_dots = [V_dots - V_d_dots for V_dots, V_d_dots in zip(V_dots, V_d_dots)]
+
 
     dVdxs = [array([qp_controller.dVdx(x, t) for x, t in zip(xs, ts)]) for xs, ts in zip(xs, ts)]
     # principal_scalings = [array([principal_scaling(x, t) for x, t in zip(xs, ts)]) for xs, ts in zip(xs, ts)]
@@ -275,6 +279,8 @@ for episode, weight in enumerate(weights):
     t_episodes = concatenate([t_episodes, ts])
 
     input_episodes = concatenate([x_episodes, dVdx_episodes[:, -1:]], 1)
+    beta = 0.01
+    sample_weight_episodes = exp(-beta * norm(dVdx_episodes[:, -1:], axis=1))
 
     N = len(x_episodes)
 
@@ -282,14 +288,14 @@ for episode, weight in enumerate(weights):
     b_trues = array([true_controller.LfV(x, t) - qp_controller.LfV(x, t) for x, t in zip(x_episodes, t_episodes)])
 
     print('Pretraining a...')
-    a.fit(input_episodes, a_trues, epochs=num_pre_train_epochs, batch_size=N)
+    a.fit(input_episodes, a_trues, epochs=num_pre_train_epochs, batch_size=N, sample_weight=sample_weight_episodes)
 
     print('Pretraining b...')
-    b.fit(input_episodes, b_trues, epochs=num_pre_train_epochs, batch_size=N)
+    b.fit(input_episodes, b_trues, epochs=num_pre_train_epochs, batch_size=N, sample_weight=sample_weight_episodes)
 
     print('Fitting V_r_dot...')
     # model.fit([dVdx_episodes, g_episodes, principal_scaling_episodes, x_episodes, u_c_episodes, u_l_episodes], V_r_dot_episodes, epochs=num_epochs, batch_size=N)
-    model.fit([dVdx_episodes, g_episodes, input_episodes, u_c_episodes, u_l_episodes], V_r_dot_episodes, epochs=num_epochs, batch_size=N)
+    model.fit([dVdx_episodes, g_episodes, input_episodes, u_c_episodes, u_l_episodes], V_r_dot_episodes, epochs=num_epochs, batch_size=N, sample_weight=sample_weight_episodes)
 
     # a_post_ests = a.predict(x_episodes)
     # a_post_ests = array([principal_scaling * a_est for principal_scaling, a_est in zip(principal_scaling_episodes, a_post_ests)])
@@ -316,7 +322,7 @@ for episode, weight in enumerate(weights):
     # print('b layer 2')
     # print(norm(b_w2, 2), norm(b_b2))
 
-    C = 1e6
+    C = 1e4
     inp = lambda x, t: concatenate([x, qp_controller.dVdx(x, t)[-1:]])
     u_aug = fixed_augmenting_controller(pd_controller.u, inp, qp_controller.V, qp_controller.LfV, qp_controller.LgV, a, b, C, alpha)
     # u_aug = principal_scaling_augmenting_controller(pd_controller.u, qp_controller.V, qp_controller.LfV, qp_controller.LgV, qp_controller.dV, principal_scaling, a, b, C, alpha)
