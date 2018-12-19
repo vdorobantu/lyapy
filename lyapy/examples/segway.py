@@ -1,8 +1,8 @@
 from keras.layers import Add, Dot, Input
 from keras.models import Model
-from matplotlib.animation import FuncAnimation
+from matplotlib.animation import FFMpegWriter, FuncAnimation
 from matplotlib.pyplot import figure, grid, legend, plot, show, subplot, suptitle, title
-from numpy import append, argsort, array, concatenate, cumsum, dot, exp, linspace, max, min, reshape, sign, split, zeros
+from numpy import append, argsort, array, concatenate, cumsum, dot, exp, linspace, logspace, max, min, ones, reshape, sign, split, zeros
 from numpy.linalg import norm, lstsq
 from numpy.random import rand
 from scipy.io import loadmat
@@ -15,15 +15,15 @@ n, m = 4, 1
 
 m_b_hat, m_w_hat, J_w_hat, c_2_hat, B_2_hat, R_hat, K_hat, r_hat, g, h_hat, m_p_hat = 20.42, 2.539, 0.063, -0.029, 0.578, 0.8796, 1.229, 0.195, 9.81, 0.56, 3.8
 param_hats = array([m_b_hat, m_w_hat, J_w_hat, c_2_hat, B_2_hat, R_hat, K_hat, r_hat, h_hat, m_p_hat])
-delta = 0.3
+delta = 0.25
 factors = 2 * delta * rand(len(param_hats)) + 1 - delta
 m_b, m_w, J_w, c_2, B_2, R, K, r, h, m_p = factors * param_hats
 
 segway_true = Segway(m_b, m_w, J_w, c_2, B_2, R, K, r, g, h, m_p)
 segway_est = Segway(m_b_hat, m_w_hat, J_w_hat, c_2_hat, B_2_hat, R_hat, K_hat, r_hat, g, h_hat, m_p_hat)
 
-K_qp = array([1, 1])
-K_pd = array([[0, -100, 0, -1]])
+K_qp = array([10, 1])
+K_pd = array([[0, -75, 0, -1]])
 
 res = loadmat('./lyapy/trajectories/segway.mat')
 x_ds, t_ds, u_ds = res['X_d'], res['T_d'][:, 0], res['U_d']
@@ -125,18 +125,20 @@ plot(t_qps, int_u_qps, linewidth=2)
 grid()
 legend(['$u_{PD}$', '$u_{QP}$'], fontsize=16)
 
-d_hidden = 200
+d_hidden = 500
 
 L = 3
 diff = differentiator(L, dt)
 
-num_episodes = 10
+num_episodes = 20
 # weights = linspace(0, 1, num_episodes + 1)[:-1]
 weights = 1 - linspace(0, 1, num_episodes + 1)[-1:0:-1] ** 2
+# betas = logspace(-2, 0, len(weights))
+betas = 0.1 * ones(weights.shape)
 # weights = [0]
 num_trajectories = 1
-num_pre_train_epochs = 5000
-num_epochs = 5000
+num_pre_train_epochs = 1000
+num_epochs = 1000
 subsample_rate = reps
 
 # principal_scaling = lambda x, t: qp_controller.dVdx(x, t)[-1]
@@ -166,7 +168,7 @@ u_int_compares = []
 
 u_aug = constant_controller(zeros((m,)))
 
-for episode, weight in enumerate(weights):
+for episode, (beta, weight) in enumerate(zip(betas, weights)):
     print('EPISODE', episode + 1)
 
     a = two_layer_nn(n + 1, d_hidden, (m,))
@@ -279,7 +281,6 @@ for episode, weight in enumerate(weights):
     t_episodes = concatenate([t_episodes, ts])
 
     input_episodes = concatenate([x_episodes, dVdx_episodes[:, -1:]], 1)
-    beta = 0.01
     sample_weight_episodes = exp(-beta * norm(dVdx_episodes[:, -1:], axis=1))
 
     N = len(x_episodes)
@@ -308,21 +309,21 @@ for episode, weight in enumerate(weights):
     # b_mse = norm(b_post_ests - b_post_trues) ** 2 / (2 * N)
     # print('a_mse', a_mse, 'b_mse', b_mse)
     #
-    # a_w1, a_b1 = a.layers[0].get_weights()
-    # a_w2, a_b2 = a.layers[2].get_weights()
-    # b_w1, b_b1 = b.layers[0].get_weights()
-    # b_w2, b_b2 = b.layers[2].get_weights()
-    #
-    # print('a layer 1')
-    # print(norm(a_w1, 2), norm(a_b1))
-    # print('a layer 2')
-    # print(norm(a_w2, 2), norm(a_b2))
-    # print('b layer 1')
-    # print(norm(b_w1, 2), norm(b_b1))
-    # print('b layer 2')
-    # print(norm(b_w2, 2), norm(b_b2))
+    a_w1, a_b1 = a.layers[0].get_weights()
+    a_w2, a_b2 = a.layers[2].get_weights()
+    b_w1, b_b1 = b.layers[0].get_weights()
+    b_w2, b_b2 = b.layers[2].get_weights()
 
-    C = 1e4
+    print('a layer 1')
+    print(norm(a_w1, 2), norm(a_b1))
+    print('a layer 2')
+    print(norm(a_w2, 2), norm(a_b2))
+    print('b layer 1')
+    print(norm(b_w1, 2), norm(b_b1))
+    print('b layer 2')
+    print(norm(b_w2, 2), norm(b_b2))
+
+    C = 1e5
     inp = lambda x, t: concatenate([x, qp_controller.dVdx(x, t)[-1:]])
     u_aug = fixed_augmenting_controller(pd_controller.u, inp, qp_controller.V, qp_controller.LfV, qp_controller.LgV, a, b, C, alpha)
     # u_aug = principal_scaling_augmenting_controller(pd_controller.u, qp_controller.V, qp_controller.LfV, qp_controller.LgV, qp_controller.dV, principal_scaling, a, b, C, alpha)
@@ -526,6 +527,8 @@ def update(frame):
 
     return lines
 
-_ = FuncAnimation(f, update, frames=range(num_episodes + 1), blit=True, interval=500, repeat=True, repeat_delay=2000)
+writer = FFMpegWriter(fps=2)
+animation = FuncAnimation(f, update, frames=range(num_episodes + 1), blit=True, interval=500, repeat=True, repeat_delay=2000)
+animation.save('output/animation.mp4', writer=writer)
 
-show(f)
+# show(f)
