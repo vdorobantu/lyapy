@@ -15,9 +15,9 @@ class InvertedPendulum(AffineControlSystem):
 	"""Inverted pendulum model.
 
 	States are x = (theta, theta_dot), where theta is the angle of the pendulum
-	in rad from upright and theta_dot is the angular rate of the pendulum in
-	rad/s clockwise. The input is u = (tau), where tau is torque in N * m,
-	applied clockwise at the base of the pendulum.
+	in rad clockwise from upright and theta_dot is the angular rate of the
+	pendulum in rad/s clockwise. The input is u = (tau), where tau is torque in
+	N * m, applied clockwise at the base of the pendulum.
 
 	Attributes:
 	Mass (kg), m: float
@@ -119,6 +119,7 @@ lyapunov_function = QuadraticControlLyapunovFunction.build_care(output, Q)
 qp_controller = QPController.build_min_norm(lyapunov_function)
 
 # Input to models is state and nonzero component of Lyapunov function gradient
+# (sparsity comes from sparsity of system acutation matrix)
 input = lambda x, t: concatenate([x, lyapunov_function.grad_V(x, t)[-output.k:]])
 s = n + output.k
 

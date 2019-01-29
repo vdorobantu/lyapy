@@ -151,7 +151,7 @@ Class for controllers with actions linear in proportional and derivative terms o
 
 `Controller` -> `LinearizingFeedbackController`
 
-Class for controllers acting on FeedbackLinearizableOutput objects that invert pseudoinvert the output decoupling, subtract the output drift, and add an auxilliary control term linear in the output.
+Class for controllers acting on FeedbackLinearizableOutput objects that pseudoinvert the output decoupling, subtract the output drift, and add an auxilliary control term linear in the output.
 
 ### `QPController`
 

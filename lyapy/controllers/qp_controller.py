@@ -103,13 +103,13 @@ class QPController(Controller):
         return QPController(affine_dynamic_output, m, a=a, b=b, C=C)
 
     def build_aug(nominal_controller, m, quadratic_control_lyapunov_function, a, b, C=Inf):
-        """Build a minimum norm augmenting controller for an affine dynamic output. 
+        """Build a minimum norm augmenting controller for an affine dynamic output.
 
         QP is
 
           inf     1 / 2 * (u + u_c)'(u + u_c) + C * (V_decoupling + a)'(V_decoupling + a) * delta^2
         u, delta
-          s.t     V_drift + V_decoupling * u_c + a'(u + u_c) <= -alpha * V + delta.
+          s.t     V_drift + V_decoupling * u_c + V_decoupling * u + a'(u + u_c) <= -alpha * V + delta.
 
         If C is Inf, the slack, delta, is removed from the problem. Exception
         will then be raised if problem is infeasible.
