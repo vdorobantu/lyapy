@@ -102,24 +102,20 @@ class TrainingLossThreshold(Callback):
 		if logs.get('loss') < self.loss_threshold:
 			self.model.stop_training = True
 
-def differentiator(L, h):
-	"""Create L-step centered differentiator filter.
+def differentiator(L):
+	half_L = (L - 1) // 2
+	ks = arange(L)
+	b = array([0, 1] + ([0] * (L - 2)))
 
-	Outputs function mapping numpy array (N,) to numpy array (N - L + 1,).
+	def _diff(xs, ts):
+		ts = ts - ts[half_L]
+		A = (array([ts]).T ** ks).T
+		w = solve(A, b)
+		return dot(w, xs)
 
-	Inputs:
-	Size of filter, L: int
-	Sample time, h: float
-	"""
-
-	ks = reshape(arange(L), (L, 1))
-	A = power(ks.T, ks)
-	b = zeros(L)
-	b[1] = -1 / h
-	w = dot(inv(A), b)
-
-	def diff(xs):
-		return convolve(w, xs, 'valid')
+	def diff(xs, ts):
+		N = len(xs)
+		return array([_diff(xs[i:(i + L)], ts[i:(i + L)]) for i in range(N - L + 1)])
 
 	return diff
 

@@ -1,7 +1,8 @@
 """Utilities for control design"""
 
-from numpy import array, dot, identity, Inf, zeros
+from numpy import array, dot, identity, Inf, reshape, tile, zeros
 from numpy.linalg import norm, solve
+from numpy.random import uniform
 
 from .controller import Controller
 
@@ -25,11 +26,11 @@ def solve_control_qp(m, P=None, q=None, r=0, a=None, b=0, C=Inf):
 	Inputs:
 	Input size, m: int
 	Cost function Hessian, P: numpy array (m, m)
-    Cost function linear term, q: numpy array (m,)
-    Cost function scalar term, r: float
-    Constraint function linear term, a: numpy array (m,)
-    Constraint function scalar term, b: float
-    Slack weight, C: float
+	Cost function linear term, q: numpy array (m,)
+	Cost function scalar term, r: float
+	Constraint function linear term, a: numpy array (m,)
+	Constraint function scalar term, b: float
+	Slack weight, C: float
 	"""
 
 	if P is None:
@@ -148,3 +149,32 @@ class PerturbingController(Controller):
 
 	def u(self, x, t):
 		return self.us[t] * (self.offset + self.scaling * norm(self.controller.u(x, t)))
+
+	def build(output, controller, t_eval, m, subsample_rate, width, scaling=1, offset=0):
+		"""Build a PerturbingController object.
+
+		Let T be the number of simulation time points.
+
+		Perturbations are of the form
+
+		xi * (offset + scaling * norm(u(x, t)))
+
+		for xi element-wise uniformly drawn from [-width, width], and u a
+		nominal controller.
+
+		Outputs a PerturbingController.
+
+		Inputs:
+		Control task output, output: Output
+		Nominal controller, controller: Controller
+		Simulation time points, t_eval: numpy array (T,)
+		Number of control inputs, m: int
+		Subsample rate: subsample_rate: int
+		Half-width of uniform distribution, width: float
+		Norm of baseline controller scaling, scaling: float
+		Norm of baseline controller offset, offset: float
+		"""
+
+		perturbations = uniform(-width, width, (len(t_eval) // subsample_rate, m))
+		perturbations = reshape(tile(perturbations, [1, subsample_rate]), (-1, m))
+		return PerturbingController(output, controller, t_eval, perturbations, scaling, offset)
