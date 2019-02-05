@@ -1,12 +1,12 @@
 """Inverted pendulum example."""
 
-from matplotlib.pyplot import figure, grid, legend, plot, semilogy, show, subplot, suptitle, title
-from numpy import arange, array, concatenate, identity, linspace, ones, reshape, sin, sqrt, tile, zeros
-from numpy.random import permutation, uniform
+from matplotlib.pyplot import figure, grid, legend, plot, show, subplot, suptitle, title
+from numpy import arange, array, concatenate, identity, ones, sin
+from numpy.random import uniform
 from scipy.io import loadmat
 
-from ..controllers import PDController, QPController, CombinedController, ConstantController, PerturbingController
-from ..learning import connect_models, differentiator, evaluator, sigmoid_weighting, TrainingLossThreshold, two_layer_nn
+from ..controllers import PDController, QPController, CombinedController
+from ..learning import evaluator, KerasTrainer, SimulationHandler
 from ..lyapunov_functions import QuadraticControlLyapunovFunction
 from ..outputs import RoboticSystemOutput
 from ..systems import AffineControlSystem
@@ -127,124 +127,34 @@ s = n + output.k
 num_episodes = 20 # Number of episodes of simulation/training
 loss_threshold = 1e-4 # Training loss threshold for an episode
 max_epochs = 5000 # Maximum number of training epochs per episode
+batch_fraction = 0.1
 validation_split = 0.1 # Percentage of training data withheld for validation
 subsample_rate = 20 # Number of time steps perturbations are held for
 width = 0.1 # Width of uniform distribution of perturbations
+scaling = 1
 offset = 0.1 # Perturbation offset
 d_hidden = 200 # Hidden layer dimension
 C = 1e3 # Augmenting controller slack weight
+weight_final = 0.99
 
 # Numerical differentiation filter
 diff_window = 3
-diff = differentiator(diff_window, dt)
-half_diff_window = (diff_window - 1) // 2
 
-# Initializing augmenting controller
-aug_controller = ConstantController(output, zeros(m))
+# Run experiments in simulation
+handler = SimulationHandler(system_true, output, pd_controller, m, lyapunov_function, x_0, t_eval, subsample_rate, width, input, C, scaling, offset)
+# Set up episodic learning with Keras
+trainer = KerasTrainer(input, lyapunov_function, diff_window, subsample_rate, n, s, m, d_hidden, loss_threshold, max_epochs, batch_fraction, validation_split)
 
-# Initializing data arrays
-t_episodes = zeros(0)
-x_episodes = zeros((0, n))
-decoupling_episodes = zeros((0, m))
-input_episodes = zeros((0, s))
-u_nom_episodes = zeros((0, m))
-u_pert_episodes = zeros((0, m))
-V_dot_r_episodes = zeros(len(t_episodes))
-
-# Initializing additional data arrays
-V_dot_episodes = zeros(0)
-V_dot_true_episodes = zeros(0)
-a_episodes = zeros((0, m))
-a_true_episodes = zeros((0, m))
-b_episodes = zeros(0)
-b_true_episodes = zeros(0)
+# Train and build augmented controller
+a, b, train_data, (a_predicts, b_predicts) = trainer.run(handler, num_episodes, weight_final)
+a = evaluator(input, a)
+b = evaluator(input, b, scalar_output=True)
+aug_controller = QPController.build_aug(pd_controller, m, lyapunov_function, a, b, C)
+total_controller = CombinedController([pd_controller, aug_controller], ones(2))
 
 # True output Lyapunov function object for comparison
 output_true = InvertedPendulumOutput(system_true, t_ds, x_ds)
 lyapunov_function_true = QuadraticControlLyapunovFunction.build_care(output_true, Q)
-
-# Sigmoid weighting
-weight_final = 0.99
-weights = sigmoid_weighting(num_episodes, weight_final)
-
-for episode, weight in enumerate(weights):
-	print('EPISODE', episode)
-
-	# Initializing and connecting models
-	a = two_layer_nn(s, d_hidden, (m,))
-	b = two_layer_nn(s, d_hidden, (1,))
-	model = connect_models(a, b)
-	model.compile('adam', 'mean_squared_error')
-
-	# Creating baseline controller
-	nom_controller = CombinedController([pd_controller, aug_controller], array([1, weight]))
-
-	# Creating perturbations
-	perturbations = uniform(-width, width, (N // subsample_rate, m))
-	perturbations = reshape(tile(perturbations, [1, subsample_rate]), (-1, m))
-	pert_controller = PerturbingController(output, nom_controller, t_eval, perturbations, offset=offset)
-
-	# Simulating experiment
-	total_controller = CombinedController([nom_controller, pert_controller], ones(2))
-	ts, xs = system_true.simulate(x_0, total_controller, t_eval)
-
-	# Post processing simulation data
-	Vs = array([lyapunov_function.V(x, t) for x, t in zip(xs, ts)])
-	xs = xs[half_diff_window:-half_diff_window:subsample_rate] # Removing data truncated by diff filter, subsampling
-	ts = ts[half_diff_window:-half_diff_window:subsample_rate] # Removing data truncated by diff filter, subsampling
-	inputs = array([input(x, t) for x, t in zip(xs, ts)])
-	u_noms = array([nom_controller.u(x, t) for x, t in zip(xs, ts)])
-	u_perts = array([pert_controller.u(x, t) for x, t in zip(xs, ts)])
-	grad_Vs = array([lyapunov_function.grad_V(x, t) for x, t in zip(xs, ts)])
-	decouplings = array([lyapunov_function.decoupling(x, t) for x, t in zip(xs, ts)])
-
-	# Label estimation
-	V_dots = diff(Vs)[::subsample_rate]
-	V_dot_ds = array([lyapunov_function.V_dot(x, u_nom, t) for x, u_nom, t in zip(xs, u_noms, ts)])
-	V_dot_rs = V_dots - V_dot_ds
-
-	# Aggregating data
-	decoupling_episodes = concatenate([decoupling_episodes, decouplings])
-	input_episodes = concatenate([input_episodes, inputs])
-	u_nom_episodes = concatenate([u_nom_episodes, u_noms])
-	u_pert_episodes = concatenate([u_pert_episodes, u_perts])
-	V_dot_r_episodes = concatenate([V_dot_r_episodes, V_dot_rs])
-
-	# Shuffling data
-	perm = permutation(len(input_episodes))
-	decoupling_trains = decoupling_episodes[perm]
-	input_trains = input_episodes[perm]
-	u_nom_trains = u_nom_episodes[perm]
-	u_pert_trains = u_pert_episodes[perm]
-	V_dot_r_trains = V_dot_r_episodes[perm]
-
-	# Fitting model
-	model.fit([decoupling_trains, input_trains, u_nom_trains, u_pert_trains], V_dot_r_trains, epochs=max_epochs, callbacks=[TrainingLossThreshold(loss_threshold)], batch_size=(len(input_episodes) // 10), validation_split=validation_split)
-
-	# Additional post processing
-	V_dot_trues = [lyapunov_function_true.V_dot(x, u_nom + u_pert, t) for x, u_nom, u_pert, t in zip(xs, u_noms, u_perts, ts)]
-	V_dot_r_debugs = V_dot_trues - V_dot_ds
-	_as = a.predict(inputs)
-	bs = b.predict(inputs)[:, 0]
-	a_trues = array([lyapunov_function_true.decoupling(x, t) - lyapunov_function.decoupling(x, t) for x, t in zip(xs, ts)])
-	b_trues = array([lyapunov_function_true.drift(x, t) - lyapunov_function.drift(x, t) for x, t in zip(xs, ts)])
-
-	# Aggregating additional data
-	V_dot_episodes = concatenate([V_dot_episodes, V_dots])
-	V_dot_true_episodes = concatenate([V_dot_true_episodes, V_dot_trues])
-	x_episodes = concatenate([x_episodes, xs])
-	a_episodes = concatenate([a_episodes, _as])
-	b_episodes = concatenate([b_episodes, bs])
-	a_true_episodes = concatenate([a_true_episodes, a_trues])
-	b_true_episodes = concatenate([b_true_episodes, b_trues])
-
-	# Building new augmenting controller
-	a = evaluator(input, a)
-	b = evaluator(input, b, scalar_output=True)
-	aug_controller = QPController.build_aug(pd_controller, m, lyapunov_function, a, b, C)
-
-# Building final augmented controller
-total_controller = CombinedController([pd_controller, aug_controller], ones(2))
 
 # Nominal QP controller simulation
 ts, xs = system_true.simulate(x_0, qp_controller, t_eval)
@@ -252,7 +162,7 @@ ts, xs = system_true.simulate(x_0, qp_controller, t_eval)
 figure()
 plot(ts, xs, linewidth=2)
 plot(t_ds, x_ds, '--', linewidth=2)
-title('QP Controller')
+title('QP Controller', fontsize=16)
 legend(['$\\theta$', '$\\dot{\\theta}$', '$\\theta_d$', '$\\dot{\\theta}_d$'], fontsize=16)
 grid()
 
@@ -262,7 +172,7 @@ ts, xs = system_true.simulate(x_0, pd_controller, t_eval)
 figure()
 plot(ts, xs, linewidth=2)
 plot(t_ds, x_ds, '--', linewidth=2)
-title('PD Controller')
+title('PD Controller', fontsize=16)
 legend(['$\\theta$', '$\\dot{\\theta}$', '$\\theta_d$', '$\\dot{\\theta}_d$'], fontsize=16)
 grid()
 
@@ -272,66 +182,65 @@ ts, xs = system_true.simulate(x_0, total_controller, t_eval)
 figure()
 plot(ts, xs, linewidth=2)
 plot(t_ds, x_ds, '--', linewidth=2)
-title('Augmented Controller')
+title('Augmented Controller', fontsize=16)
 legend(['$\\theta$', '$\\dot{\\theta}$', '$\\theta_d$', '$\\dot{\\theta}_d$'], fontsize=16)
 grid()
 
 # Additional evaluation plots
-
-figure()
-suptitle('Episode data')
-subplot(2, 1, 1)
-title('State data')
-plot(x_episodes)
-legend(['$\\theta$', '$\\dot{\\theta}$'], fontsize=16)
-grid()
-subplot(2, 1, 2)
-title('Control data')
-plot(u_nom_episodes + u_pert_episodes)
-legend(['$u$'], fontsize=16)
-grid()
-
-figure()
-plot(V_dot_episodes, linewidth=2)
-plot(V_dot_true_episodes, '--', linewidth=2)
-title('Numerical differentiation')
-legend(['Estimated $\\dot{V}$', 'True $\\dot{V}$'], fontsize=16)
-grid()
-
-figure()
-suptitle('Training results')
-subplot(2, 1, 1)
-plot(a_episodes)
-plot(a_true_episodes, '--')
-title('$a$')
-legend(['Estimated', 'True'], fontsize=16)
-grid()
-subplot(2, 1, 2)
-plot(b_episodes)
-plot(b_true_episodes, '--')
-title('$b$')
-legend(['Estimated', 'True'], fontsize=16)
-grid()
-
-# Testing post processing
-_as = array([a(x, t) for x, t in zip(xs, ts)])
-bs = array([b(x, t) for x, t in zip(xs, ts)])
+a_tests = array([a(x, t) for x, t in zip(xs, ts)])
 a_trues = array([lyapunov_function_true.decoupling(x, t) - lyapunov_function.decoupling(x, t) for x, t in zip(xs, ts)])
+b_tests = array([b(x, t) for x, t in zip(xs, ts)])
 b_trues = array([lyapunov_function_true.drift(x, t) - lyapunov_function.drift(x, t) for x, t in zip(xs, ts)])
 
 figure()
-suptitle('Testing results')
+suptitle('Test data', fontsize=16)
 subplot(2, 1, 1)
-plot(_as)
-plot(a_trues, '--')
-title('a')
-legend(['Estimated', 'True'], fontsize=16)
+plot(a_tests, label='$\\widehat{a}$', linewidth=2)
+plot(a_trues, label='$a$', linewidth=2)
+legend(fontsize=16)
 grid()
 subplot(2, 1, 2)
-plot(bs)
-plot(b_trues, '--')
-title('b')
-legend(['Estimated', 'True'], fontsize=16)
+plot(b_tests, label='$\\widehat{b}$', linewidth=2)
+plot(b_trues, label='$b$', linewidth=2)
+legend(fontsize=16)
+grid()
+
+xs, ts, _, _, u_noms, u_perts, V_dot_rs = train_data
+a_trues = array([lyapunov_function_true.decoupling(x, t) - lyapunov_function.decoupling(x, t) for x, t in zip(xs, ts)])
+b_trues = array([lyapunov_function_true.drift(x, t) - lyapunov_function.drift(x, t) for x, t in zip(xs, ts)])
+V_dot_r_trues = array([lyapunov_function_true.V_dot(x, u_nom + u_pert, t) - lyapunov_function.V_dot(x, u_nom, t) for x, u_nom, u_pert, t in zip(xs, u_noms, u_perts, ts)])
+
+figure()
+suptitle('Episode data', fontsize=16)
+subplot(2, 1, 1)
+title('State data', fontsize=16)
+plot(xs, linewidth=2)
+legend(['$\\theta$', '$\\dot{\\theta}$'], fontsize=16)
+grid()
+subplot(2, 1, 2)
+title('Control data', fontsize=16)
+plot(u_noms + u_perts, label='$u$', linewidth=2)
+legend(fontsize=16)
+grid()
+
+figure()
+plot(V_dot_rs, linewidth=2, label='$\\widehat{\\dot{V}}_r$')
+plot(V_dot_r_trues, '--', linewidth=2, label='$\\dot{V}_r$')
+title('Numerical differentiation', fontsize=16)
+legend(fontsize=16)
+grid()
+
+figure()
+suptitle('Training results', fontsize=16)
+subplot(2, 1, 1)
+plot(a_predicts, label='$\\widehat{a}$', linewidth=2)
+plot(a_trues, '--', label='$a$', linewidth=2)
+legend(fontsize=16)
+grid()
+subplot(2, 1, 2)
+plot(b_predicts, label='$\\widehat{b}$', linewidth=2)
+plot(b_trues, '--', label='$b$', linewidth=2)
+legend(fontsize=16)
 grid()
 
 show()
