@@ -1,18 +1,16 @@
 """All controller classes.
 
-Classes:
-AdaptivePendulumController - Minimum norm Control Lypaunov Function (CLF)
-adaptive controller for inverted pendulum system
-Controller - Base class for controllers
-PendulumController - Minimum norm Control Lypaunov Function (CLF) controller for
-inverted pendulum system
-DoublePendulumController -Minimum norm Control Lypaunov Function (CLF) controller for
-double inverted pendulum system
-PDController - PD controller for any system
+CombinedController - Linear combination of controllers.
+ConstantController - Constant control action.
+Controller - Base class for controllers.
+LinearizingFeedbackController - Linearizing feedback controller for feedback linearizable outputs.
+PDController - Proportional-derivative controller for PD outputs.
+PerturbingController - Predetermined time-based controller, scaled by norm of baseline controller.
+QPController - Quadratic program controller.
 """
 
-from .adaptive_pendulum_controller import AdaptivePendulumController
-from .pendulum_controller import PendulumController
-from .double_pendulum_controller import DoublePendulumController
+from .controller import Controller
+from .linearizing_feedback_controller import LinearizingFeedbackController
 from .pd_controller import PDController
-from .segway_controller import SegwayController
+from .qp_controller import QPController
+from .util import CombinedController, ConstantController, PerturbingController

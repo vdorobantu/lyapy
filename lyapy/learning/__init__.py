@@ -1,7 +1,15 @@
 """Learning utilities.
 
-Modules:
-util - Utilities for learning problems
+connect_models - Connect two keras models affinely.
+differentiator - Create L-step centered differentiator filter.
+evaluator - Create a function wrapped around keras model predict call.
+KerasHandler - Trainer object for Keras models.
+sigmoid_weighting - Compute weights governed by a sigmoid function for specified number of weights and final weight.
+SimulationHandler - Handler object for native simulations.
+TrainingLossThreshold - Class to stop keras training when training loss falls below a threshold.
+two_layer_nn - Create a two-layer neural network.
 """
 
-from .util import augmenting_controller, connect_models, constant_controller, differentiator, evaluator, generateRunEp, genRunEpPD, interpolate, linear_model, random_controller, sparse_connect_models, sum_controller, two_layer_nn, principal_scaling_connect_models, principal_scaling_cvx_augmenting_controller, principal_scaling_augmenting_controller, weighted_controller, discrete_random_controller, fixed_connect_models, fixed_augmenting_controller
+from .keras_trainer import KerasTrainer
+from .simulation_handler import SimulationHandler
+from .util import connect_models, differentiator, evaluator, sigmoid_weighting, TrainingLossThreshold, two_layer_nn

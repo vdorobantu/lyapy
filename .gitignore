@@ -3,5 +3,5 @@ __pycache__
 *.pyc
 .DS_Store
 *.mat
-*.mp4
 *.mov
+*.mp4

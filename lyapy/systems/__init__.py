@@ -1,14 +1,10 @@
-"""All dynamical system classes.
+"""All system classes.
 
-Classes:
-AdaptivePendulum - Inverted pendulum system for adaptive control
-Pendulum - Inverted pendulum system
-DoublePendulum - Double inverted pendulum system
-Segway - Planar Segway system
-System - Base class for dynamical systems
+AffineControlSystem - Base class for affine control systems of the form x_dot = f(x) + g(x) * u.
+ControlSystem - Base class for control systems of the form x_dot = f(x, u, t).
+System - Base class for dynamical systems of the form x_dot = f(t, x).
 """
 
-from .adaptive_pendulum import AdaptivePendulum
-from .pendulum import Pendulum
-from .double_pendulum import DoublePendulum
-from .segway import Segway
+from .affine_control_system import AffineControlSystem
+from .control_system import ControlSystem
+from .system import System

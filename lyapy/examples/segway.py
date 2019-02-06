@@ -1,534 +1,335 @@
-from keras.layers import Add, Dot, Input
-from keras.models import Model
-from matplotlib.animation import FFMpegWriter, FuncAnimation
+"""Planar segway example."""
+
 from matplotlib.pyplot import figure, grid, legend, plot, show, subplot, suptitle, title
-from numpy import append, argsort, array, concatenate, cumsum, dot, exp, linspace, logspace, max, min, ones, reshape, sign, split, zeros
-from numpy.linalg import norm, lstsq
-from numpy.random import rand
+from numpy import arange, array, concatenate, cos, identity, ones, sin, tanh
+from numpy.random import uniform
 from scipy.io import loadmat
 
-from ..controllers import PDController, SegwayController
-from ..systems import Segway
-from ..learning import constant_controller, differentiator, evaluator, interpolate, discrete_random_controller, sum_controller, two_layer_nn, principal_scaling_connect_models, principal_scaling_augmenting_controller, weighted_controller, fixed_connect_models, fixed_augmenting_controller
+from ..controllers import CombinedController, PDController, QPController
+from ..learning import evaluator, KerasTrainer, SimulationHandler
+from ..lyapunov_functions import QuadraticControlLyapunovFunction
+from ..outputs import RoboticSystemOutput
+from ..systems import AffineControlSystem
 
-n, m = 4, 1
+class SegwaySystem(AffineControlSystem):
+    def __init__(self, m_b=44.798, m_w=2.485, J_w=0.055936595310797, a_2=-0.023227187592750, c_2=0.166845864363019, B_2=2.899458828344427, R= 0.086985141514373, K=0.141344665167821, r=0.195, g=9.81, f_d=0.076067344020759, f_v=0.002862586216301, V_nom=57):
 
-m_b_hat, m_w_hat, J_w_hat, c_2_hat, B_2_hat, R_hat, K_hat, r_hat, g, h_hat, m_p_hat = 20.42, 2.539, 0.063, -0.029, 0.578, 0.8796, 1.229, 0.195, 9.81, 0.56, 3.8
-param_hats = array([m_b_hat, m_w_hat, J_w_hat, c_2_hat, B_2_hat, R_hat, K_hat, r_hat, h_hat, m_p_hat])
-delta = 0.25
-factors = 2 * delta * rand(len(param_hats)) + 1 - delta
-m_b, m_w, J_w, c_2, B_2, R, K, r, h, m_p = factors * param_hats
+        self.f_3 = lambda x_dot, theta, theta_dot: (1/2) * R ** (-1) * (4 * \
+        B_2 * J_w + 4 * a_2 ** 2 * J_w * m_b + 4 * c_2 ** 2 * J_w * m_b + 2 * \
+        B_2 * m_b * r ** 2 + a_2 ** 2 * m_b ** 2 * r ** 2 + c_2 ** 2 * m_b ** \
+        2 * r ** 2 + 4 * B_2 * m_w * r ** 2 + 4 * a_2 ** 2 * m_b * m_w * r ** \
+        2 + 4 * c_2 ** 2 * m_b * m_w * r ** 2 + (a_2 ** 2 + (-1) * c_2 ** 2) * \
+        m_b ** 2 * r ** 2 * cos(2 * theta) + 2 * a_2 * c_2 * m_b ** 2 * r ** 2 \
+        * sin(2 * theta)) ** (-1) * (800 * B_2 * K ** 2 * theta_dot * r + 800 \
+        * a_2 ** 2 * K ** 2 * m_b * theta_dot * r + 800 * c_2 ** 2 * K ** 2 * \
+        m_b * theta_dot * r + 800 * B_2 * f_v * theta_dot * r * R + 800 * a_2 \
+        ** 2 * f_v * m_b * theta_dot * r * R + 800 * c_2 ** 2 * f_v * m_b * \
+        theta_dot * r * R + (-800) * B_2 * K ** 2 * x_dot + (-800) * a_2 ** 2 \
+        * K ** 2 * m_b * x_dot + (-800) * c_2 ** 2 * K ** 2 * m_b * x_dot + \
+        (-800) * B_2 * f_v * R * x_dot + (-800) * a_2 ** 2 * f_v * m_b * R * \
+        x_dot + (-800) * c_2 ** 2 * f_v * m_b * R * x_dot + 80 * c_2 * K ** 2 \
+        * m_b * theta_dot * r ** 2 * cos(theta) + 80 * c_2 * f_v * m_b * \
+        theta_dot * r ** 2 * R * cos(theta) + 4 * a_2 * B_2 * m_b * theta_dot \
+        ** 2 * r ** 2 * R * cos(theta) + 4 * a_2 ** 3 * m_b ** 2 * theta_dot \
+        ** 2 * r ** 2 * R * cos(theta) + 4 * a_2 * c_2 ** 2 * m_b ** 2 * \
+        theta_dot ** 2 * r ** 2 * R * cos(theta) + (-80) * c_2 * K ** 2 * m_b \
+        * r * x_dot * cos(theta) + (-80) * c_2 * f_v * m_b * r * R * x_dot * \
+        cos(theta) + (-4) * a_2 * c_2 * g * m_b ** 2 * r ** 2 * R * cos(2 * \
+        theta) + (-80) * a_2 * K ** 2 * m_b * theta_dot * r ** 2 * sin(theta) \
+        + (-80) * a_2 * f_v * m_b * theta_dot * r ** 2 * R * sin(theta) + 4 * \
+        B_2 * c_2 * m_b * theta_dot ** 2 * r ** 2 * R * sin(theta) + 4 * a_2 \
+        ** 2 * c_2 * m_b ** 2 * theta_dot ** 2 * r ** 2 * R * sin(theta) + 4 * \
+        c_2 ** 3 * m_b ** 2 * theta_dot ** 2 * r ** 2 * R * sin(theta) + 80 * \
+        a_2 * K ** 2 * m_b * r * x_dot * sin(theta) + 80 * a_2 * f_v * m_b * r \
+        * R * x_dot * sin(theta) + 2 * a_2 ** 2 * g * m_b ** 2 * r ** 2 * R * \
+        sin(2 * theta) + (-2) * c_2 ** 2 * g * m_b ** 2 * r ** 2 * R * sin(2 * \
+        theta) + 4 * f_d * r * R * (10 * (B_2 + (a_2 ** 2 + c_2 ** 2) * m_b) + \
+        c_2 * m_b * r * cos(theta) + (-1) * a_2 * m_b * r * sin(theta)) * \
+        tanh(500 * r ** (-1) * (2 * theta_dot * r + (-2) * x_dot)) + (-4) * \
+        f_d * r * R * (10 * (B_2 + (a_2 ** 2 + c_2 ** 2) * m_b) + c_2 * m_b * \
+        r * cos(theta) + (-1) * a_2 * m_b * r * sin(theta)) * tanh(500 * r ** \
+        (-1) * ((-2) * theta_dot * r + 2 * x_dot)))
 
-segway_true = Segway(m_b, m_w, J_w, c_2, B_2, R, K, r, g, h, m_p)
-segway_est = Segway(m_b_hat, m_w_hat, J_w_hat, c_2_hat, B_2_hat, R_hat, K_hat, r_hat, g, h_hat, m_p_hat)
+        self.f_4 = lambda x_dot, theta, theta_dot: r ** (-1) * R ** (-1) * (4 * \
+        B_2 * J_w + 4 * a_2 ** 2 * J_w * m_b + 4 * c_2 ** 2 * J_w * m_b + 2 *
+        B_2 * m_b * r ** 2 + a_2 ** 2 * m_b ** 2 * r ** 2 + c_2 ** 2 * m_b ** \
+        2 * r ** 2 + 4 * B_2 * m_w * r ** 2 + 4 * a_2 ** 2 * m_b * m_w * r ** \
+        2 + 4 * c_2 ** 2 * m_b * m_w * r ** 2 + (a_2 ** 2 + (-1) * c_2 ** 2) * \
+        m_b ** 2 * r ** 2 * cos(2 * theta) + 2 * a_2 * c_2 * m_b ** 2 * r ** \
+        2 * sin(2 * theta)) ** (-1) * ((-80) * J_w * K ** 2 * theta_dot * r + \
+        (-40) * K ** 2 * m_b * theta_dot * r ** 3 + (-80) * K ** 2 * m_w * \
+        theta_dot * r ** 3 + (-80) * f_v * J_w * theta_dot * r * R + (-40) * \
+        f_v * m_b * theta_dot * r ** 3 * R + (-80) * f_v * m_w * theta_dot * \
+        r ** 3 * R + 80 * J_w * K ** 2 * x_dot + 40 * K ** 2 * m_b * r ** 2 * \
+        x_dot + 80 * K ** 2 * m_w * r ** 2 * x_dot + 80 * f_v * J_w * R * \
+        x_dot + 40 * f_v * m_b * r ** 2 * R * x_dot + 80 * f_v * m_w * r ** 2 \
+        * R * x_dot + (-400) * c_2 * K ** 2 * m_b * theta_dot * r ** 2 * \
+        cos(theta) + 4 * a_2 * g * J_w * m_b * r * R * cos(theta) + (-400) * \
+        c_2 * f_v * m_b * theta_dot * r ** 2 * R * cos(theta) + 2 * a_2 * g * \
+        m_b ** 2 * r ** 3 * R * cos(theta) + 4 * a_2 * g * m_b * m_w * r ** 3 \
+        * R * cos(theta) + 400 * c_2 * K ** 2 * m_b * r * x_dot * cos(theta) + \
+        400 * c_2 * f_v * m_b * r * R * x_dot * cos(theta) + (-2) * a_2 * c_2 \
+        * m_b ** 2 * theta_dot ** 2 * r ** 3 * R * cos(2 * theta) + 400 * a_2 \
+        * K ** 2 * m_b * theta_dot * r ** 2 * sin(theta) + 4 * c_2 * g * J_w * \
+        m_b * r * R * sin(theta) + 400 * a_2 * f_v * m_b * theta_dot * r ** 2 \
+        * R * sin(theta) + 2 * c_2 * g * m_b ** 2 * r ** 3 * R * sin(theta) + \
+        4 * c_2 * g * m_b * m_w * r ** 3 * R * sin(theta) + (-400) * a_2 * K \
+        ** 2 * m_b * r * x_dot * sin(theta) + (-400) * a_2 * f_v * m_b * r * \
+        R * x_dot * sin(theta) + a_2 ** 2 * m_b ** 2 * theta_dot ** 2 * r ** 3 \
+        * R * sin(2 * theta) + (-1) * c_2 ** 2 * m_b ** 2 * theta_dot ** 2 * r \
+        ** 3 * R * sin(2 * theta) + (-2) * f_d * r * R * (2 * J_w + m_b * r ** \
+        2 + 2 * m_w * r ** 2 + 10 * c_2 * m_b * r * cos(theta) + (-10) * a_2 * \
+        m_b * r * sin(theta)) * tanh(500 * r ** (-1) * (2 * theta_dot * r + \
+        (-2) * x_dot)) + 2 * f_d * r * R * (2 * J_w + m_b * r ** 2 + 2 * m_w * \
+        r ** 2 + 10 * c_2 * m_b * r * cos(theta) + (-10) * a_2 * m_b * r * \
+        sin(theta)) * tanh(500 * r ** (-1) * ((-2) * theta_dot * r + 2 * \
+        x_dot)))
 
-K_qp = array([10, 1])
-K_pd = array([[0, -75, 0, -1]])
+        self.g_3 = lambda theta: (-2) * K * r * R ** (-1) * V_nom * ((-10) * \
+        (B_2 + (a_2 ** 2 + c_2 ** 2) * m_b) + (-1) * c_2 * m_b * r * \
+        cos(theta) + a_2 * m_b * r * sin(theta)) * (2 * B_2 * J_w + 2 * a_2 ** \
+        2 * J_w * m_b + 2 * c_2 ** 2 * J_w * m_b + B_2 * m_b * r ** 2 + a_2 ** \
+        2 * m_b ** 2 * r ** 2 + c_2 ** 2 * m_b ** 2 * r ** 2 + 2 * B_2 * m_w * \
+        r ** 2 + 2 * a_2 ** 2 * m_b * m_w * r ** 2 + 2 * c_2 ** 2 * m_b * m_w \
+        * r ** 2 + (-1) * c_2 ** 2 * m_b ** 2 * r ** 2 * cos(theta) ** 2 + \
+        (-1) * a_2 ** 2 * m_b ** 2 * r ** 2 * sin(theta) ** 2 + a_2 * c_2 * \
+        m_b ** 2 * r ** 2 * sin(2 * theta)) ** (-1)
 
+        self.g_4 = lambda theta: (-4) * K * R ** (-1) * V_nom * (2 * J_w + m_b \
+        * r ** 2 + 2 * m_w * r ** 2 + 10 * c_2 * m_b * r * cos(theta) + (-10) \
+        * a_2 * m_b * r * sin(theta)) * (4 * B_2 * J_w + 4 * a_2 ** 2 * J_w * \
+        m_b + 4 * c_2 ** 2 * J_w * m_b + 2 * B_2 * m_b * r ** 2 + a_2 ** 2 * \
+        m_b ** 2 * r ** 2 + c_2 ** 2 * m_b ** 2 * r ** 2 + 4 * B_2 * m_w * r \
+        ** 2 + 4 * a_2 ** 2 * m_b * m_w * r ** 2 + 4 * c_2 ** 2 * m_b * m_w * \
+        r ** 2 + (a_2 ** 2 + (-1) * c_2 ** 2) * m_b ** 2 * r ** 2 * cos(2 * \
+        theta) + 2 * a_2 * c_2 * m_b ** 2 * r ** 2 * sin(2 * theta)) ** (-1)
+
+    def drift(self, x):
+        _, theta, x_dot, theta_dot = x
+        return array([x_dot, theta_dot, self.f_3(theta, x_dot, theta_dot), self.f_4(theta, x_dot, theta_dot)])
+
+    def act(self, x):
+        _, theta, _, _ = x
+        return array([[0], [0], [self.g_3(theta)], [self.g_4(theta)]])
+
+class SegwayOutput(RoboticSystemOutput):
+    def __init__(self, segway, ts, theta_ds, theta_dot_ds):
+        RoboticSystemOutput.__init__(self, 1)
+        self.segway = segway
+        theta_ds = array([theta_ds]).T
+        theta_dot_ds = array([theta_dot_ds]).T
+        self.r, self.r_dot = self.interpolator(ts, theta_ds, theta_dot_ds)
+        self.nonzero = array([1, 3])
+
+    def eta(self, x, t):
+        return x[self.nonzero] - self.r(t)
+
+    def drift(self, x, t):
+        return self.segway.drift(x)[self.nonzero] - self.r_dot(t)
+
+    def decoupling(self, x, t):
+        return self.segway.act(x)[self.nonzero]
+
+# Estimated system parameters
+m_b_hat = 44.798
+m_w_hat = 2.485
+J_w_hat = 0.055936595310797
+a_2_hat = -0.023227187592750
+c_2_hat = 0.166845864363019
+B_2_hat = 2.899458828344427
+R_hat =  0.086985141514373
+K_hat = 0.141344665167821
+r_hat = 0.195
+g = 9.81
+f_d_hat = 0.076067344020759
+f_v_hat = 0.002862586216301
+V_nom_hat = 57
+param_hats = array([m_b_hat, m_w_hat, J_w_hat, a_2_hat, c_2_hat, B_2_hat, R_hat, K_hat, r_hat, f_d_hat, f_v_hat, V_nom_hat])
+
+# True system parameters
+delta = 0.2 # Max paramter variation
+factors = uniform(1 - delta, 1 + delta, len(param_hats))
+params = factors * param_hats
+m_b, m_w, J_w, a_2, c_2, B_2, R, K, r, f_d, f_v, V_nom = params
+
+system = SegwaySystem(m_b_hat, m_w_hat, J_w_hat, a_2_hat, c_2_hat, B_2_hat, R_hat, K_hat, r_hat, g, f_d_hat, f_v_hat, V_nom_hat) # Estimated system
+system_true = SegwaySystem(m_b, m_w, J_w, a_2, c_2, B_2, R, K, r, g, f_d, f_v, V_nom) # Actual system
+
+# Control design parameters
+K_p = array([[0.5]]) # PD controller P gain
+K_d = array([[0.1]]) # PD controller D gain
+n = 4 # Number of states
+m = 1 # Number of inputs
+k = 1 # Number of outputs
+p = 2 * k # Output vector size
+Q = identity(p) # Positive definite Q for CARE
+
+# Simulation parameters
+x_0 = array([2, 0, 0, 0]) # Initial condition
+dt = 1e-3 # Time step
+N = 5000 # Number of time steps
+t_eval = dt * arange(N + 1) # Simulation time points
+
+# Loading trajectory data
 res = loadmat('./lyapy/trajectories/segway.mat')
-x_ds, t_ds, u_ds = res['X_d'], res['T_d'][:, 0], res['U_d']
+t_ds = res['T_d'][:, 0] # Time points
+x_ds = res['X_d'] # Desired states
+theta_ds = x_ds[:, 1] # Desired angle points
+theta_dot_ds = x_ds[:, 3] # Desired angular rate points
 
-r, r_dot, r_ddot = interpolate(t_ds, x_ds[:, 0:2], x_ds[:, 2:])
-r_qp = lambda t: r(t)[1]
-r_dot_qp = lambda t: r_dot(t)[1]
-r_ddot_qp = lambda t: r_ddot(t)[1]
+# Output and control definitions
+output = SegwayOutput(system, t_ds, theta_ds, theta_dot_ds)
+pd_controller = PDController(output, K_p, K_d)
+lyapunov_function = QuadraticControlLyapunovFunction.build_care(output, Q)
+qp_controller = QPController.build_min_norm(lyapunov_function)
 
-qp_controller = SegwayController(segway_est, K_qp, r_qp, r_dot_qp, r_ddot_qp)
-true_controller = SegwayController(segway_true, K_qp, r_qp, r_dot_qp, r_ddot_qp)
-pd_controller = PDController(K_pd, r, r_dot)
+# Input to models is state and nonzero component of Lyapunov function gradient
+# (sparsity comes from sparsity of system acutation matrix)
+input = lambda x, t: concatenate([x, lyapunov_function.grad_V(x, t)[-output.k:]])
+s = n + output.k
 
-x_0 = array([2, 0, 0, 0])
-t_span = [0, 5]
-dt = 1e-3
-t_eval = [step * dt for step in range((t_span[-1] - t_span[0]) * int(1 / dt))]
-
-t_qps, x_qps = segway_true.simulate(qp_controller.u, x_0, t_eval)
+subsample_rate = 20
 width = 0.1
-reps = 10
-u_pd = sum_controller([pd_controller.u, discrete_random_controller(pd_controller.u, m, width, t_eval, reps)])
-t_pds, x_pds = segway_true.simulate(u_pd, x_0, t_eval)
+C = 1e3
+scaling = 1
+offset = 0.1
+diff_window = 3
+d_hidden = 200
+training_loss_threshold = 1e-4
+max_epochs = 5000
+batch_fraction = 0.1
+validation_split = 0.1
+num_episodes = 2
+weight_final = 0.99
 
-u_qps = array([qp_controller.u(x, t) for x, t in zip(x_qps, t_qps)])
-u_pds = array([u_pd(x, t) for x, t in zip(x_pds, t_pds)])
+handler = SimulationHandler(system_true, output, pd_controller, m, lyapunov_function, x_0, t_eval, subsample_rate, width, input, C, scaling, offset)
+trainer = KerasTrainer(input, lyapunov_function, diff_window, subsample_rate, n, s, m, d_hidden, training_loss_threshold, max_epochs, batch_fraction, validation_split)
+a, b, train_data, (a_predicts, b_predicts) = trainer.run(handler, num_episodes, weight_final)
+a = evaluator(input, a)
+b = evaluator(input, b, scalar_output=True)
+aug_controller = QPController.build_aug(pd_controller, m, lyapunov_function, a, b, C)
+total_controller = CombinedController([pd_controller, aug_controller], ones(2))
 
-int_u_qps = cumsum(abs(u_qps)) * dt
-int_u_pds = cumsum(abs(u_pds)) * dt
-
-figure()
-suptitle('QP Controller', fontsize=16)
-
-subplot(2, 2, 1)
-plot(t_ds, x_ds[:, 0], '--', linewidth=2)
-plot(t_qps, x_qps[:, 0], linewidth=2)
-grid()
-legend(['$x_d$', '$x$'], fontsize=16)
-
-subplot(2, 2, 2)
-plot(t_ds, x_ds[:, 1], '--', linewidth=2)
-plot(t_qps, x_qps[:, 1], linewidth=2)
-grid()
-legend(['$\\theta_d$', '$\\theta$'], fontsize=16)
-
-subplot(2, 2, 3)
-plot(t_ds, x_ds[:, 2], '--', linewidth=2)
-plot(t_qps, x_qps[:, 2], linewidth=2)
-grid()
-legend(['$\\dot{x}_d$', '$\\dot{x}$'], fontsize=16)
-
-subplot(2, 2, 4)
-plot(t_ds, x_ds[:, 3], '--', linewidth=2)
-plot(t_qps, x_qps[:, 3], linewidth=2)
-grid()
-legend(['$\\dot{\\theta}_d$', '$\\dot{\\theta}$'], fontsize=16)
+# PD controller simulation
+ts, xs = system_true.simulate(x_0, pd_controller, t_eval)
+thetas = xs[:, 1]
+theta_dots = xs[:, 3]
+us = array([pd_controller.u(x, t) for x, t in zip(xs, ts)])
 
 figure()
-suptitle('PD Controller', fontsize=16)
-
-subplot(2, 2, 1)
-plot(t_ds, x_ds[:, 0], '--', linewidth=2)
-plot(t_pds, x_pds[:, 0], linewidth=2)
-grid()
-legend(['$x_d$', '$x$'], fontsize=16)
-
-subplot(2, 2, 2)
-plot(t_ds, x_ds[:, 1], '--', linewidth=2)
-plot(t_pds, x_pds[:, 1], linewidth=2)
-grid()
-legend(['$\\theta_d$', '$\\theta$'], fontsize=16)
-
-subplot(2, 2, 3)
-plot(t_ds, x_ds[:, 2], '--', linewidth=2)
-plot(t_pds, x_pds[:, 2], linewidth=2)
-grid()
-legend(['$\\dot{x}_d$', '$\\dot{x}$'], fontsize=16)
-
-subplot(2, 2, 4)
-plot(t_ds, x_ds[:, 3], '--', linewidth=2)
-plot(t_pds, x_pds[:, 3], linewidth=2)
-grid()
-legend(['$\\dot{\\theta}_d$', '$\\dot{\\theta}$'], fontsize=16)
-
-figure()
-
 subplot(2, 1, 1)
-title('Control', fontsize=16)
-plot(t_pds, u_pds, '--', linewidth=2)
-plot(t_qps, u_qps, linewidth=2)
+plot(ts, thetas, linewidth=2, label='$\\theta$')
+plot(ts, theta_dots, linewidth=2, label='$\\dot{\\theta}$')
+plot(t_ds, theta_ds, '--', linewidth=2, label='$\\theta_d$')
+plot(t_ds, theta_dot_ds, '--', linewidth=2, label='$\\dot{\\theta}_d$')
+title('PD Controller')
+legend(fontsize=16)
 grid()
-legend(['$u_{PD}$', '$u_{QP}$'], fontsize=16)
-
-
 subplot(2, 1, 2)
-title('Control integral', fontsize=16)
-plot(t_pds, int_u_pds, '--', linewidth=2)
-plot(t_qps, int_u_qps, linewidth=2)
+plot(ts, us, label='$u$')
+legend(fontsize=16)
 grid()
-legend(['$u_{PD}$', '$u_{QP}$'], fontsize=16)
 
-d_hidden = 500
-
-L = 3
-diff = differentiator(L, dt)
-
-num_episodes = 20
-# weights = linspace(0, 1, num_episodes + 1)[:-1]
-weights = 1 - linspace(0, 1, num_episodes + 1)[-1:0:-1] ** 2
-# betas = logspace(-2, 0, len(weights))
-betas = 0.1 * ones(weights.shape)
-# weights = [0]
-num_trajectories = 1
-num_pre_train_epochs = 1000
-num_epochs = 1000
-subsample_rate = reps
-
-# principal_scaling = lambda x, t: qp_controller.dVdx(x, t)[-1]
-alpha = 1 / qp_controller.lambda_1
-
-dVdx_episodes = zeros((0, n))
-g_episodes = zeros((0, n, m))
-# principal_scaling_episodes = zeros((0,))
-x_episodes = zeros((0, n))
-u_c_episodes = zeros((0, m))
-u_l_episodes = zeros((0, m))
-V_r_dot_episodes = zeros((0,))
-t_episodes = zeros((0,))
-
-x_compares = []
-u_compares = []
-t_compares = []
-u_int_compares = []
-
-# window = 5
-#
-# x_lst_sq_episodes = zeros((0, n))
-# a_lst_sq_episodes = zeros((0, m))
-# b_lst_sq_episodes = zeros((0, 1))
-# principal_scaling_lst_sq_episodes = zeros((0,))
-# t_lst_sq_episodes = zeros((0,))
-
-u_aug = constant_controller(zeros((m,)))
-
-for episode, (beta, weight) in enumerate(zip(betas, weights)):
-    print('EPISODE', episode + 1)
-
-    a = two_layer_nn(n + 1, d_hidden, (m,))
-    b = two_layer_nn(n + 1, d_hidden, (1,))
-    # model = principal_scaling_connect_models(a, b)
-    model = fixed_connect_models(a, b, n)
-
-    a.compile('adam', 'mean_absolute_error')
-    b.compile('adam', 'mean_absolute_error')
-    model.compile('adam', 'mean_squared_error')
-
-    u_c = sum_controller([pd_controller.u, weighted_controller(weight, u_aug)])
-    u_ls = [discrete_random_controller(pd_controller.u, m, width, t_eval, reps) for _ in range(num_trajectories)]
-    us = [sum_controller([u_c, u_l]) for u_l in u_ls]
-
-    sols = [segway_true.simulate(u, x_0, t_eval) for u in us]
-
-    Vs = [array([qp_controller.V(x, t) for x, t in zip(xs, ts)]) for ts, xs in sols]
-    # TODO: FIX THIS
-    # V_dots = [diff(Vs)[::subsample_rate] for Vs in Vs]
-
-    half_L = (L - 1) // 2
-    xs = [xs[half_L:-half_L:subsample_rate] for _, xs in sols]
-    ts = [ts[half_L:-half_L:subsample_rate] for ts, _ in sols]
-    u_cs = [array([u_c(x, t) for x, t in zip(xs, ts)]) for xs, ts in zip(xs, ts)]
-    u_ls = [array([u_l(x, t) for x, t in zip(xs, ts)]) for xs, ts, u_l in zip(xs, ts, u_ls)]
-    # TODO: FIX THIS TOO
-    V_dots = [array([true_controller.dV(x, u_c + u_l, t) for x, u_c, u_l, t in zip(xs, u_cs, u_ls, ts)]) for xs, u_cs, u_ls, ts in zip(xs, u_cs, u_ls, ts)]
-
-    V_d_dots = [array([qp_controller.dV(x, u_c, t) for x, u_c, t in zip(xs, u_cs, ts)]) for xs, u_cs, ts in zip(xs, u_cs, ts)]
-    V_r_dots = [V_dots - V_d_dots for V_dots, V_d_dots in zip(V_dots, V_d_dots)]
-
-
-    dVdxs = [array([qp_controller.dVdx(x, t) for x, t in zip(xs, ts)]) for xs, ts in zip(xs, ts)]
-    # principal_scalings = [array([principal_scaling(x, t) for x, t in zip(xs, ts)]) for xs, ts in zip(xs, ts)]
-
-    # A_lst_sqs = [array([principal_scaling * append(u_c + u_l, 1) for principal_scaling, u_c, u_l in zip(principal_scalings, u_cs, u_ls)]) for principal_scalings, u_cs, u_ls in zip(principal_scalings, u_cs, u_ls)]
-    # b_lst_sqs = [array([V_r_dot - dot(qp_controller.LgV(x, t), u_l) for V_r_dot, x, u_l, t in zip(V_r_dots, xs, u_ls, ts)]) for V_r_dots, xs, u_ls, ts in zip(V_r_dots, xs, u_ls, ts)]
-    #
-    # w_lst_sqs = concatenate([array([lstsq(A_lst_sqs[idx:idx+window], b_lst_sqs[idx:idx+window], rcond=None)[0] for idx in range(len(A_lst_sqs) - window + 1)]) for A_lst_sqs, b_lst_sqs in zip(A_lst_sqs, b_lst_sqs)])
-    # a_lst_sqs = w_lst_sqs[:, :-1]
-    # b_lst_sqs = w_lst_sqs[:, -1:]
-    #
-    # half_window = (window - 1) // 2
-    # x_lst_sqs = concatenate([xs[half_window:-half_window] for xs in xs])
-    # principal_scaling_lst_sqs = concatenate([principal_scalings[half_window:-half_window] for principal_scalings in principal_scalings])
-    # t_lst_sqs = concatenate([ts[half_window:-half_window] for ts in ts])
-    #
-    # x_lst_sq_episodes = concatenate([x_lst_sq_episodes, x_lst_sqs])
-    # a_lst_sq_episodes = concatenate([a_lst_sq_episodes, a_lst_sqs])
-    # b_lst_sq_episodes = concatenate([b_lst_sq_episodes, b_lst_sqs])
-    # principal_scaling_lst_sq_episodes = concatenate([principal_scaling_lst_sq_episodes, principal_scaling_lst_sqs])
-    # t_lst_sq_episodes = concatenate([t_lst_sq_episodes, t_lst_sqs])
-
-    # N = len(x_lst_sq_episodes)
-
-    # a_pre_trues = array([(true_controller.LgV(x, t) - qp_controller.LgV(x, t)) / principal_scaling for x, t, principal_scaling in zip(x_lst_sq_episodes, t_lst_sq_episodes, principal_scaling_lst_sq_episodes)])
-    # b_pre_trues = array([(true_controller.LfV(x, t) - qp_controller.LfV(x, t)) / principal_scaling for x, t, principal_scaling in zip(x_lst_sq_episodes, t_lst_sq_episodes, principal_scaling_lst_sq_episodes)])
-
-    # print('Fitting a...')
-    # a.fit(x_lst_sq_episodes, a_lst_sq_episodes, epochs=num_pre_train_epochs, batch_size=N, validation_split=0.2)
-    # a.fit(x_lst_sq_episodes, a_pre_trues, epochs=num_pre_train_epochs, batch_size=N, validation_split=0.2)
-    # print('Fitting b...')
-    # b.fit(x_lst_sq_episodes, b_lst_sq_episodes, epochs=num_pre_train_epochs, batch_size=N, validation_split=0.2)
-    # b.fit(x_lst_sq_episodes, b_pre_trues, epochs=num_pre_train_epochs, batch_size=N, validation_split=0.2)
-
-    # a_w1, a_b1 = a.layers[0].get_weights()
-    # a_w2, a_b2 = a.layers[2].get_weights()
-    # b_w1, b_b1 = b.layers[0].get_weights()
-    # b_w2, b_b2 = b.layers[2].get_weights()
-    #
-    # print('a layer 1')
-    # print(norm(a_w1, 2), norm(a_b1))
-    # print('a layer 2')
-    # print(norm(a_w2, 2), norm(a_b2))
-    # print('b layer 1')
-    # print(norm(b_w1, 2), norm(b_b1))
-    # print('b layer 2')
-    # print(norm(b_w2, 2), norm(b_b2))
-    #
-    # a_pre_ests = a.predict(x_lst_sq_episodes)
-    # a_pre_ests = array([principal_scaling * a_est for principal_scaling, a_est in zip(principal_scaling_lst_sq_episodes, a_pre_ests)])
-    # b_pre_ests = b.predict(x_lst_sq_episodes)[:,0]
-    # b_pre_ests = array([principal_scaling * b_est for principal_scaling, b_est in zip(principal_scaling_lst_sq_episodes, b_pre_ests)])
-    #
-    # a_pre_trues = array([true_controller.LgV(x, t) - qp_controller.LgV(x, t) for x, t in zip(x_lst_sq_episodes, t_lst_sq_episodes)])
-    # b_pre_trues = array([true_controller.LfV(x, t) - qp_controller.LfV(x, t) for x, t in zip(x_lst_sq_episodes, t_lst_sq_episodes)])
-    # a_mse = norm(a_pre_ests - a_pre_trues, 'fro') ** 2 / (2 * N)
-    # b_mse = norm(b_pre_ests - b_pre_trues) ** 2 / (2 * N)
-    # print('a_mse', a_mse, 'b_mse', b_mse)
-
-    dVdxs = concatenate(dVdxs)
-    # principal_scalings = concatenate(principal_scalings)
-    xs = concatenate(xs)
-    u_cs = concatenate(u_cs)
-    u_ls = concatenate(u_ls)
-    V_r_dots = concatenate(V_r_dots)
-
-    ts = concatenate(ts)
-
-    gs = array([segway_est.act(x) for x in xs])
-
-    dVdx_episodes = concatenate([dVdx_episodes, dVdxs])
-    g_episodes = concatenate([g_episodes, gs])
-    # principal_scaling_episodes = concatenate([principal_scaling_episodes, principal_scalings])
-    x_episodes = concatenate([x_episodes, xs])
-    u_c_episodes = concatenate([u_c_episodes, u_cs])
-    u_l_episodes = concatenate([u_l_episodes, u_ls])
-    V_r_dot_episodes = concatenate([V_r_dot_episodes, V_r_dots])
-    t_episodes = concatenate([t_episodes, ts])
-
-    input_episodes = concatenate([x_episodes, dVdx_episodes[:, -1:]], 1)
-    sample_weight_episodes = exp(-beta * norm(dVdx_episodes[:, -1:], axis=1))
-
-    N = len(x_episodes)
-
-    a_trues = array([true_controller.LgV(x, t) - qp_controller.LgV(x, t) for x, t in zip(x_episodes, t_episodes)])
-    b_trues = array([true_controller.LfV(x, t) - qp_controller.LfV(x, t) for x, t in zip(x_episodes, t_episodes)])
-
-    print('Pretraining a...')
-    a.fit(input_episodes, a_trues, epochs=num_pre_train_epochs, batch_size=N, sample_weight=sample_weight_episodes)
-
-    print('Pretraining b...')
-    b.fit(input_episodes, b_trues, epochs=num_pre_train_epochs, batch_size=N, sample_weight=sample_weight_episodes)
-
-    print('Fitting V_r_dot...')
-    # model.fit([dVdx_episodes, g_episodes, principal_scaling_episodes, x_episodes, u_c_episodes, u_l_episodes], V_r_dot_episodes, epochs=num_epochs, batch_size=N)
-    model.fit([dVdx_episodes, g_episodes, input_episodes, u_c_episodes, u_l_episodes], V_r_dot_episodes, epochs=num_epochs, batch_size=N, sample_weight=sample_weight_episodes)
-
-    # a_post_ests = a.predict(x_episodes)
-    # a_post_ests = array([principal_scaling * a_est for principal_scaling, a_est in zip(principal_scaling_episodes, a_post_ests)])
-    # b_post_ests = b.predict(x_episodes)[:,0]
-    # b_post_ests = array([principal_scaling * b_est for principal_scaling, b_est in zip(principal_scaling_episodes, b_post_ests)])
-    #
-    # a_post_trues = array([true_controller.LgV(x, t) - qp_controller.LgV(x, t) for x, t in zip(x_episodes, t_episodes)])
-    # b_post_trues = array([true_controller.LfV(x, t) - qp_controller.LfV(x, t) for x, t in zip(x_episodes, t_episodes)])
-    # a_mse = norm(a_post_ests - a_post_trues, 'fro') ** 2 / (2 * N)
-    # b_mse = norm(b_post_ests - b_post_trues) ** 2 / (2 * N)
-    # print('a_mse', a_mse, 'b_mse', b_mse)
-    #
-    a_w1, a_b1 = a.layers[0].get_weights()
-    a_w2, a_b2 = a.layers[2].get_weights()
-    b_w1, b_b1 = b.layers[0].get_weights()
-    b_w2, b_b2 = b.layers[2].get_weights()
-
-    print('a layer 1')
-    print(norm(a_w1, 2), norm(a_b1))
-    print('a layer 2')
-    print(norm(a_w2, 2), norm(a_b2))
-    print('b layer 1')
-    print(norm(b_w1, 2), norm(b_b1))
-    print('b layer 2')
-    print(norm(b_w2, 2), norm(b_b2))
-
-    C = 1e5
-    inp = lambda x, t: concatenate([x, qp_controller.dVdx(x, t)[-1:]])
-    u_aug = fixed_augmenting_controller(pd_controller.u, inp, qp_controller.V, qp_controller.LfV, qp_controller.LgV, a, b, C, alpha)
-    # u_aug = principal_scaling_augmenting_controller(pd_controller.u, qp_controller.V, qp_controller.LfV, qp_controller.LgV, qp_controller.dV, principal_scaling, a, b, C, alpha)
-
-    ts, xs = segway_true.simulate(u_c, x_0, t_eval)
-    us = array([u_c(x, t) for x, t in zip(xs, ts)])
-    u_ints = cumsum(array([norm(u) for u in us])) * dt
-
-    x_compares.append(xs)
-    u_compares.append(us)
-    t_compares.append(ts)
-    u_int_compares.append(u_ints)
-
-# a_lst_sq_episodes = array([a_lst_sq * principal_scaling for a_lst_sq, principal_scaling in zip(a_lst_sq_episodes, principal_scaling_lst_sq_episodes)])
-# b_lst_sq_episodes = array([b_lst_sq * principal_scaling for b_lst_sq, principal_scaling in zip(b_lst_sq_episodes, principal_scaling_lst_sq_episodes)])
-#
-# figure()
-# suptitle('$a$ and $b$ least squares estimates', fontsize=16)
-#
-# subplot(2, 1, 1)
-# title('a')
-# plot(a_lst_sq_episodes)
-# plot(a_pre_trues, '--')
-# grid()
-#
-# subplot(2, 1, 2)
-# title('b')
-# plot(b_lst_sq_episodes)
-# plot(b_pre_trues, '--')
-# grid()
-#
-# figure()
-# suptitle('$a$ and $b$ pretrained estimates', fontsize=16)
-#
-# subplot(2, 1, 1)
-# title('a')
-# plot(a_pre_ests)
-# plot(a_pre_trues, '--')
-# grid()
-#
-# subplot(2, 1, 2)
-# title('b')
-# plot(b_pre_ests)
-# plot(b_pre_trues, '--')
-# grid()
-#
-# figure()
-# suptitle('$a$ and $b$ trained estimates', fontsize=16)
-#
-# subplot(2, 1, 1)
-# title('a')
-# plot(a_post_ests)
-# plot(a_post_trues, '--')
-# grid()
-#
-# subplot(2, 1, 2)
-# title('b')
-# plot(b_post_ests)
-# plot(b_post_trues, '--')
-# grid()
-
-# TODO: Remove this weighted thing
-u = sum_controller([pd_controller.u, u_aug])
-# u = sum_controller([pd_controller.u, weighted_controller(0.1, u_aug)])
-
-ts, xs = segway_true.simulate(u, x_0, t_eval)
-us = array([u(x, t) for x, t in zip(xs, ts)])
-u_ints = cumsum(array([norm(u) for u in us])) * dt
-
-x_compares.append(xs)
-u_compares.append(us)
-t_compares.append(ts)
-u_int_compares.append(u_ints)
-
-a_ests = a.predict(input_episodes)
-b_ests = b.predict(input_episodes)
+# Nominal QP controller simulation
+ts, xs = system_true.simulate(x_0, qp_controller, t_eval)
+thetas = xs[:, 1]
+theta_dots = xs[:, 3]
+us = array([qp_controller.u(x, t) for x, t in zip(xs, ts)])
 
 figure()
-suptitle('Debug', fontsize=16)
-
 subplot(2, 1, 1)
-plot(a_ests, linewidth=2)
-plot(a_trues, '--', linewidth=2)
+plot(ts, thetas, linewidth=2, label='$\\theta$')
+plot(ts, theta_dots, linewidth=2, label='$\\dot{\\theta}$')
+plot(t_ds, theta_ds, '--', linewidth=2, label='$\\theta_d$')
+plot(t_ds, theta_dot_ds, '--', linewidth=2, label='$\\dot{\\theta}_d$')
+title('QP Controller')
+legend(fontsize=16)
 grid()
-legend(['Estimated', 'True'], fontsize=16)
-title('a', fontsize=16)
-
 subplot(2, 1, 2)
-plot(b_ests, linewidth=2)
-plot(b_trues, '--', linewidth=2)
+plot(ts, us, label='$u$')
+legend(fontsize=16)
 grid()
-legend(['Estimated', 'True'], fontsize=16)
-title('b', fontsize=16)
+
+# Augmented controller simulation
+ts, xs = system_true.simulate(x_0, total_controller, t_eval)
+thetas = xs[:, 1]
+theta_dots = xs[:, 3]
+us = array([total_controller.u(x, t) for x, t in zip(xs, ts)])
 
 figure()
-suptitle('Augmented Controller', fontsize=16)
-
-subplot(2, 2, 1)
-plot(t_ds, x_ds[:, 0], '--', linewidth=2)
-plot(ts, xs[:, 0], linewidth=2)
+subplot(2, 1, 1)
+plot(ts, thetas, linewidth=2, label='$\\theta$')
+plot(ts, theta_dots, linewidth=2, label='$\\dot{\\theta}$')
+plot(t_ds, theta_ds, '--', linewidth=2, label='$\\theta_d$')
+plot(t_ds, theta_dot_ds, '--', linewidth=2, label='$\\dot{\\theta}_d$')
+title('Augmented Controller')
+legend(fontsize=16)
 grid()
-legend(['$x_d$', '$x$'], fontsize=16)
-
-subplot(2, 2, 2)
-plot(t_ds, x_ds[:, 1], '--', linewidth=2)
-plot(ts, xs[:, 1], linewidth=2)
+subplot(2, 1, 2)
+plot(ts, us, label='$u$')
+legend(fontsize=16)
 grid()
-legend(['$\\theta_d$', '$\\theta$'], fontsize=16)
 
-subplot(2, 2, 3)
-plot(t_ds, x_ds[:, 2], '--', linewidth=2)
-plot(ts, xs[:, 2], linewidth=2)
-grid()
-legend(['$\\dot{x}_d$', '$\\dot{x}$'], fontsize=16)
-
-subplot(2, 2, 4)
-plot(t_ds, x_ds[:, 3], '--', linewidth=2)
-plot(ts, xs[:, 3], linewidth=2)
-grid()
-legend(['$\\dot{\\theta}_d$', '$\\dot{\\theta}$'], fontsize=16)
-
-def V_r_dot_true(x, u_c, u_l, t):
-    return true_controller.dV(x, u_c + u_l, t) - qp_controller.dV(x, u_c, t)
-
-V_r_dot_true_episodes = array([V_r_dot_true(x, u_c, u_l, t) for x, u_c, u_l, t in zip(x_episodes, u_c_episodes, u_l_episodes, t_episodes)])
+# Additional plots
+output_true = SegwayOutput(system_true, t_ds, theta_ds, theta_dot_ds)
+lyapunov_function_true = QuadraticControlLyapunovFunction.build_care(output_true, Q)
+a_tests = array([a(x, t) for x, t in zip(xs, ts)])
+a_trues = array([lyapunov_function_true.decoupling(x, t) - lyapunov_function.decoupling(x, t) for x, t in zip(xs, ts)])
+b_tests = array([b(x, t) for x, t in zip(xs, ts)])
+b_trues = array([lyapunov_function_true.drift(x, t) - lyapunov_function.drift(x, t) for x, t in zip(xs, ts)])
 
 figure()
-title('Derivative Estimation', fontsize=16)
-plot(V_r_dot_episodes, linewidth=2)
-plot(V_r_dot_true_episodes, '--', linewidth=2)
+suptitle('Test data', fontsize=16)
+subplot(2, 1, 1)
+plot(a_tests, label='$\\widehat{a}$', linewidth=2)
+plot(a_trues, label='$a$', linewidth=2)
+legend(fontsize=16)
 grid()
-legend(['Estimated', 'Truth'], fontsize=16)
+subplot(2, 1, 2)
+plot(b_tests, label='$\\widehat{b}$', linewidth=2)
+plot(b_trues, label='$b$', linewidth=2)
+legend(fontsize=16)
+grid()
 
-us = array([u(x, t) for x, t in zip(x_episodes, t_episodes)])
-u_trues = array([true_controller.u(x, t) for x, t in zip(x_episodes, t_episodes)])
+xs, ts, _, _, u_noms, u_perts, V_dot_rs = train_data
+thetas = xs[:, 1]
+theta_dots = xs[:, 3]
+a_trues = array([lyapunov_function_true.decoupling(x, t) - lyapunov_function.decoupling(x, t) for x, t in zip(xs, ts)])
+b_trues = array([lyapunov_function_true.drift(x, t) - lyapunov_function.drift(x, t) for x, t in zip(xs, ts)])
+V_dot_r_trues = array([lyapunov_function_true.V_dot(x, u_nom + u_pert, t) - lyapunov_function.V_dot(x, u_nom, t) for x, u_nom, u_pert, t in zip(xs, u_noms, u_perts, ts)])
 
 figure()
-title('Controller comparison', fontsize=16)
-plot(us, linewidth=2)
-plot(u_trues, linewidth=2)
+suptitle('Episode data', fontsize=16)
+subplot(2, 1, 1)
+title('State data', fontsize=16)
+plot(thetas, linewidth=2, label='$\\theta$')
+plot(theta_dots, linewidth=2, label='$\\dot{\\theta}$')
+legend(fontsize=16)
 grid()
-legend(['Augmented', 'Perfect'], fontsize=16)
-
-Vs = array([qp_controller.V(x, t) for x, t in zip(xs, ts)])
-
-t_trues, x_trues = segway_true.simulate(true_controller.u, x_0, t_eval)
-V_trues = array([true_controller.V(x, t) for x, t in zip(x_trues, t_trues)])
+subplot(2, 1, 2)
+title('Control data', fontsize=16)
+plot(u_noms + u_perts, label='$u$', linewidth=2)
+legend(fontsize=16)
+grid()
 
 figure()
-title('Lyapunov function comparison', fontsize=16)
-plot(ts, Vs, linewidth=2)
-plot(ts, V_trues, '--', linewidth=2)
+plot(V_dot_rs, linewidth=2, label='$\\widehat{\\dot{V}}_r$')
+plot(V_dot_r_trues, '--', linewidth=2, label='$\\dot{V}_r$')
+title('Numerical differentiation', fontsize=16)
+legend(fontsize=16)
 grid()
-legend(['Augmented', 'Perfect'], fontsize=16)
+
+figure()
+suptitle('Training results', fontsize=16)
+subplot(2, 1, 1)
+plot(a_predicts, label='$\\widehat{a}$', linewidth=2)
+plot(a_trues, '--', label='$a$', linewidth=2)
+legend(fontsize=16)
+grid()
+subplot(2, 1, 2)
+plot(b_predicts, label='$\\widehat{b}$', linewidth=2)
+plot(b_trues, '--', label='$b$', linewidth=2)
+legend(fontsize=16)
+grid()
 
 show()
-
-x_animates = split(x_episodes, num_episodes)
-u_c_animates = split(u_c_episodes, num_episodes)
-u_l_animates = split(u_l_episodes, num_episodes)
-ts = t_eval[half_L:-half_L-1:subsample_rate]
-t_0, t_final = ts[0], ts[-1]
-
-x_min, theta_min, x_dot_min, theta_dot_min = min(concatenate(x_compares), 0)
-x_max, theta_max, x_dot_max, theta_dot_max = max(concatenate(x_compares), 0)
-u_min = min(concatenate(u_compares, 0)[:, 0])
-u_max = max(concatenate(u_compares, 0)[:, 0])
-u_int_min = min(concatenate(u_int_compares, 0))
-u_int_max = max(concatenate(u_int_compares, 0))
-mins = [x_min, theta_min, u_min, x_dot_min, theta_dot_min, u_int_min]
-maxs = [x_max, theta_max, u_max, x_dot_max, theta_dot_max, u_int_max]
-
-print(factors)
-
-f = figure()
-axs = f.subplots(2, 3)
-
-ax_ds = reshape(axs[0:2, 0:2], -1)
-for ax_d, traj_d in zip(ax_ds, x_ds.T):
-    ax_d.plot(t_ds, traj_d, '--')
-
-axs = reshape(axs, -1)
-titles = ['$x$', '$\\theta$', '$u$', '$\\dot{x}$', '$\\dot{\\theta}$', '$\\int u$']
-
-for ax, title, minimum, maximum in zip(axs, titles, mins, maxs):
-    ax.set_xlim(t_0, t_final)
-    ax.set_ylim(min([0.9 * minimum, 1.1 * minimum]), max([0.9 * maximum, 1.1 * maximum]))
-    ax.set_title(title, fontsize=16)
-    ax.grid()
-lines = [ax.plot([], [], linewidth=2)[0] for ax in axs]
-
-def update(frame):
-    xs, thetas, x_dots, theta_dots = x_compares[frame].T
-    us = u_compares[frame][:, 0]
-    u_ints = u_int_compares[frame]
-
-    trajs = [xs, thetas, us, x_dots, theta_dots, u_ints]
-
-    for line, traj in zip(lines, trajs):
-        line.set_data(t_compares[frame], traj)
-
-    return lines
-
-writer = FFMpegWriter(fps=2)
-animation = FuncAnimation(f, update, frames=range(num_episodes + 1), blit=True, interval=500, repeat=True, repeat_delay=2000)
-animation.save('output/animation.mp4', writer=writer)
-
-# show(f)
