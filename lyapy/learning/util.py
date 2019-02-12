@@ -3,27 +3,47 @@
 from keras.callbacks import Callback
 from keras.layers import Add, Dense, Dot, Dropout, Input, Reshape
 from keras.models import Model, Sequential
-from numpy import arange, array, convolve, dot, linspace, power, product, reshape, tile, zeros
+from numpy import arange, array, concatenate, convolve, dot, linspace, ones, power, product, reshape, tile, zeros
 from numpy.linalg import inv, solve
 
 from ..controllers import PDController
 
-def sigmoid_weighting(num_episodes, weight_final):
+def sigmoid_weighting(num_episodes, weight_final, add_episodes=0):
 	"""Compute weights governed by a sigmoid function for specified number of weights and final weight.
 
-	Let T be the number of weights.
+	Let T be the number of weights, excluding additional start and end weights.
 
 	First episode weight is 1 - (final weight). If number of weights is odd,
 	weight for episode (T - 1) / 2 is 0.5.
 
-	Outputs a numpy array (T,).
+	Outputs a numpy array (T + 2 * add_episodes,).
 
 	Inputs:
 	Number of episodes, num_episodes: int
 	Final weight: weight_final: float
+	Number of start weights (or end weights), add_episodes: int
 	"""
 
-	return 1 / (1 + ((1 - weight_final) / (weight_final)) ** (2 * linspace(0, 1, num_episodes) - 1))
+	weights = 1 / (1 + ((1 - weight_final) / (weight_final)) ** (2 * linspace(0, 1, num_episodes) - 1))
+	return concatenate([zeros(add_episodes), weights, ones(add_episodes)])
+
+def decay_widths(num_episodes, width, add_episodes):
+	"""Compute permuting controller widths for specified number of episodes.
+
+	Let T be the number of episodes, excluding additional episodes.
+
+	First T + add_episodes episodes use nominal width, then width is reduced
+	linearly for last add_episodes episodes.
+
+	Outputs a numpy array (T + 2 * add_episodes,).
+
+	Inputs:
+	Number of episodes, num_episodes: int
+	Nominal width, width: float
+	Number of decaying width episodes, add_episodes: int
+	"""
+
+	return concatenate([width * ones(add_episodes + num_episodes), linspace(width, 0, add_episodes)])
 
 def two_layer_nn(d_in, d_hidden, output_shape, dropout_prob=0):
 	"""Create a two-layer neural network.

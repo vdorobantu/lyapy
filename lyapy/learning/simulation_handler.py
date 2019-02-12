@@ -24,7 +24,7 @@ class SimulationHandler(Handler):
     PerturbingController generator, gen_pert: Controller -> PerturbingController
     """
 
-    def __init__(self, system, output, controller, m, lyapunov_function, x_0, t_eval, subsample_rate, width, input, C=Inf, scaling=1, offset=0):
+    def __init__(self, system, output, controller, m, lyapunov_function, x_0, t_eval, subsample_rate, input, C=Inf, scaling=1, offset=0):
         """Initialize a SimulationHandler object.
 
         Inputs:
@@ -36,7 +36,6 @@ class SimulationHandler(Handler):
         Initial condition, x_0: numpy array (n,)
         Simulation times, t_eval: numpy array (T,)
         Subsample rate, subsample_rate: int
-        Perturbation width: width
         Function mapping state and time to model inputs, input: numpy array (n,) * float -> numpy array (s,)
         Slack weight, C: int
         Norm of baseline controller scaling, scaling: float
@@ -51,9 +50,9 @@ class SimulationHandler(Handler):
         self.t_eval = t_eval
         self.input = input
         self.C = C
-        self.gen_pert = lambda nom_controller: PerturbingController.build(output, nom_controller, t_eval, m, subsample_rate, width, scaling, offset)
+        self.gen_pert = lambda nom_controller, width: PerturbingController.build(output, nom_controller, t_eval, m, subsample_rate, width, scaling, offset)
 
-    def run(self, weight, a=None, b=None):
+    def run(self, weight, width, a=None, b=None):
         if a is None or b is None:
             nom_controller = self.controller
         else:
@@ -62,7 +61,7 @@ class SimulationHandler(Handler):
             aug_controller = QPController.build_aug(self.controller, self.m, self.lyapunov_function, a, b, self.C)
             nom_controller = CombinedController([self.controller, aug_controller], array([1, weight]))
 
-        pert_controller = self.gen_pert(nom_controller)
+        pert_controller = self.gen_pert(nom_controller, width)
         total_controller = CombinedController([nom_controller, pert_controller], ones(2))
 
         ts, xs = self.system.simulate(self.x_0, total_controller, self.t_eval)

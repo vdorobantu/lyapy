@@ -132,7 +132,7 @@ class Trainer:
 
         return log
 
-    def run(self, handler, num_episodes, weight_final):
+    def run(self, handler, weights, widths):
         """Run episodic experiments and learn augmenting Lyapunov function drift and decoupling models.
 
         Let N be the number of episodes and let T be the number of data points
@@ -142,11 +142,9 @@ class Trainer:
 
         Inputs:
         Experiment handler, handler: Handler object
-        Number of episodes, num_episodes: int
-        Final augmenting controller weight, weight_final: float
+        Augmenting controller weights, weights: numpy array (N,)
+        Perturbing controller widths, widths: numpy array (N,)
         """
-
-        weights = sigmoid_weighting(num_episodes, weight_final)
 
         a = None
         b = None
@@ -160,10 +158,10 @@ class Trainer:
         train_data = (xs, ts, decouplings, inputs, u_noms, u_perts, V_dot_rs)
         log = self.init_log()
 
-        for episode, weight in enumerate(weights):
+        for episode, (weight, width) in enumerate(zip(weights, widths)):
             print('EPISODE', episode)
 
-            exp_data = handler.run(weight, a, b)
+            exp_data = handler.run(weight, width, a, b)
             _train_data = self.process(exp_data)
             train_data = self.aggregate(train_data, _train_data)
             a, b = self.fit(train_data)
