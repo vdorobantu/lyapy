@@ -106,7 +106,7 @@ class SegwaySystem(AffineControlSystem):
 
     def drift(self, x):
         _, theta, x_dot, theta_dot = x
-        return array([x_dot, theta_dot, self.f_3(theta, x_dot, theta_dot), self.f_4(theta, x_dot, theta_dot)])
+        return array([x_dot, theta_dot, self.f_3(x_dot, theta, theta_dot), self.f_4(x_dot, theta, theta_dot)])
 
     def act(self, x):
         _, theta, _, _ = x
