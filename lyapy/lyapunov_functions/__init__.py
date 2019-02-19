@@ -5,6 +5,7 @@ LearnedQuadraticControlLyapunovFunction - Class for Quadratic CLFs, augmented wi
 LyapunovFunction - Base class for Lyapunov Functions.
 QuadraticControlLyapunovFunction - Class for Control Lyapunov Functions (CLFs) of the form V(eta) = eta' P eta.
 QuadraticLyapunovFunction - Class for Lyapunov functions of the form V(eta) = eta' P eta.
+RESQuadraticControlLyapunovFunction - Class for Rapidly Exponentially Stabilizing Control Lyapunov Functions (RES-CLFs).
 """
 
 from .control_lyapunov_function import ControlLyapunovFunction
@@ -12,3 +13,4 @@ from .learned_quadratic_control_lyapunov_function import LearnedQuadraticControl
 from .lyapunov_function import LyapunovFunction
 from .quadratic_control_lyapunov_function import QuadraticControlLyapunovFunction
 from .quadratic_lyapunov_function import QuadraticLyapunovFunction
+from .res_quadratic_control_lyapunov_function import RESQuadraticControlLyapunovFunction

@@ -4,7 +4,7 @@ from numpy import zeros
 from numpy.random import permutation
 
 from .trainer import Trainer
-from .util import connect_models, TrainingLossThreshold, two_layer_nn
+from .util import connect_models, multi_layer_nn, TrainingLossThreshold
 
 class KerasTrainer(Trainer):
     """Trainer object for Keras models.
@@ -28,7 +28,7 @@ class KerasTrainer(Trainer):
     Validation split, validation_split: float
     """
 
-    def __init__(self, input, lyapunov_function, diff_window, subsample_rate, n, s, m, d_hidden, training_loss_threshold=1e-3, max_epochs=1000, batch_fraction=1, validation_split=0):
+    def __init__(self, input, lyapunov_function, diff_window, subsample_rate, n, s, m, d_hidden, N_hidden=1, training_loss_threshold=1e-3, max_epochs=1000, batch_fraction=1, validation_split=0):
         """Initialize a KerasTrainer object.
 
         Inputs:
@@ -39,7 +39,8 @@ class KerasTrainer(Trainer):
         Number of states, n: int
         Size of input vector, s: int
         Number of control inputs, m: int
-        Hidden layer dimension: d_hidden: int
+        Hidden layer dimension, d_hidden: int
+        Number of hidden layers, N_hidden: int
         Training loss threshold, training_loss_threshold: float
         Maximum number of epochs, max_epochs: int
         Fraction of data for a batch, batch_fraction: float
@@ -48,6 +49,7 @@ class KerasTrainer(Trainer):
 
         Trainer.__init__(self, input, lyapunov_function, diff_window, subsample_rate, n, s, m)
         self.d_hidden = d_hidden
+        self.N_hidden = N_hidden
         self.callbacks = [TrainingLossThreshold(training_loss_threshold)]
         self.max_epochs = max_epochs
         self.batch_fraction = batch_fraction
@@ -81,8 +83,8 @@ class KerasTrainer(Trainer):
         _, _, decouplings, inputs, u_noms, u_perts, V_dot_rs = self.shuffle(train_data)
         batch_size = int(len(V_dot_rs) * self.batch_fraction)
 
-        a = two_layer_nn(self.s, self.d_hidden, (self.m,))
-        b = two_layer_nn(self.s, self.d_hidden, (1,))
+        a = multi_layer_nn(self.s, self.d_hidden, self.N_hidden, (self.m,))
+        b = multi_layer_nn(self.s, self.d_hidden, self.N_hidden, (1,))
         model = connect_models(a, b)
         model.compile('adam', 'mean_squared_error')
 

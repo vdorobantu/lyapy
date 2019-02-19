@@ -7,7 +7,7 @@ from scipy.io import loadmat
 
 from ..controllers import CombinedController, PDController, QPController
 from ..learning import decay_widths, evaluator, KerasTrainer, sigmoid_weighting, SimulationHandler
-from ..lyapunov_functions import QuadraticControlLyapunovFunction
+from ..lyapunov_functions import RESQuadraticControlLyapunovFunction
 from ..outputs import RoboticSystemOutput
 from ..systems import AffineControlSystem
 
@@ -156,13 +156,14 @@ system = SegwaySystem(m_b_hat, m_w_hat, J_w_hat, a_2_hat, c_2_hat, B_2_hat, R_ha
 system_true = SegwaySystem(m_b, m_w, J_w, a_2, c_2, B_2, R, K, r, g, f_d, f_v, V_nom) # Actual system
 
 # Control design parameters
-K_p = array([[0.5]]) # PD controller P gain
+K_p = array([[2]]) # PD controller P gain
 K_d = array([[0.1]]) # PD controller D gain
 n = 4 # Number of states
 m = 1 # Number of inputs
 k = 1 # Number of outputs
 p = 2 * k # Output vector size
 Q = identity(p) # Positive definite Q for CARE
+epsilon = 0.1 # Convergence rate scale factor for RES-CLF
 
 # Simulation parameters
 x_0 = array([2, 0, 0, 0]) # Initial condition
@@ -180,7 +181,7 @@ theta_dot_ds = x_ds[:, 3] # Desired angular rate points
 # Output and control definitions
 output = SegwayOutput(system, t_ds, theta_ds, theta_dot_ds)
 pd_controller = PDController(output, K_p, K_d)
-lyapunov_function = QuadraticControlLyapunovFunction.build_care(output, Q)
+lyapunov_function = RESQuadraticControlLyapunovFunction.build_care(output, Q, epsilon)
 qp_controller = QPController.build_min_norm(lyapunov_function)
 
 # Input to models is state and nonzero component of Lyapunov function gradient
@@ -190,23 +191,24 @@ s = n + output.k
 
 subsample_rate = 20
 width = 0.1
-C = 1e3
+C = 0.01
 scaling = 1
-offset = 0.1
+offset = 0
 diff_window = 3
-d_hidden = 200
+d_hidden = 2000
+N_hidden = 1
 training_loss_threshold = 1e-4
 max_epochs = 5000
 batch_fraction = 0.1
 validation_split = 0.1
-num_episodes = 10
+num_episodes = 20
 weight_final = 0.99
-add_episodes = 5
+add_episodes = 0
 weights = sigmoid_weighting(num_episodes, weight_final, add_episodes)
 widths = decay_widths(num_episodes, width, add_episodes)
 
 handler = SimulationHandler(system_true, output, pd_controller, m, lyapunov_function, x_0, t_eval, subsample_rate, input, C, scaling, offset)
-trainer = KerasTrainer(input, lyapunov_function, diff_window, subsample_rate, n, s, m, d_hidden, training_loss_threshold, max_epochs, batch_fraction, validation_split)
+trainer = KerasTrainer(input, lyapunov_function, diff_window, subsample_rate, n, s, m, d_hidden, N_hidden, training_loss_threshold, max_epochs, batch_fraction, validation_split)
 a, b, train_data, (a_predicts, b_predicts) = trainer.run(handler, weights, widths)
 a = evaluator(input, a)
 b = evaluator(input, b, scalar_output=True)
@@ -275,7 +277,7 @@ grid()
 
 # Additional plots
 output_true = SegwayOutput(system_true, t_ds, theta_ds, theta_dot_ds)
-lyapunov_function_true = QuadraticControlLyapunovFunction.build_care(output_true, Q)
+lyapunov_function_true = RESQuadraticControlLyapunovFunction.build_care(output_true, Q, epsilon)
 a_tests = array([a(x, t) for x, t in zip(xs, ts)])
 a_trues = array([lyapunov_function_true.decoupling(x, t) - lyapunov_function.decoupling(x, t) for x, t in zip(xs, ts)])
 b_tests = array([b(x, t) for x, t in zip(xs, ts)])

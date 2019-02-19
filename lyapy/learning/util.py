@@ -45,8 +45,8 @@ def decay_widths(num_episodes, width, add_episodes):
 
 	return concatenate([width * ones(add_episodes + num_episodes), linspace(width, 0, add_episodes)])
 
-def two_layer_nn(d_in, d_hidden, output_shape, dropout_prob=0):
-	"""Create a two-layer neural network.
+def multi_layer_nn(d_in, d_hidden, N_hidden, output_shape, dropout_prob=0):
+	"""Create a multi-layer neural network.
 
 	Uses Rectified Linear Unit (ReLU) nonlinearity.
 
@@ -55,6 +55,7 @@ def two_layer_nn(d_in, d_hidden, output_shape, dropout_prob=0):
 	Inputs:
 	Input dimension, d_in: int
 	Hidden layer dimension, d_hidden: int
+	Number of hidden layers, N_hidden: int
 	Output shape, output_shape: int tuple
 	Dropout regularization probability, dropout_prob: float
 	"""
@@ -62,6 +63,11 @@ def two_layer_nn(d_in, d_hidden, output_shape, dropout_prob=0):
 	model = Sequential()
 	model.add(Dense(d_hidden, input_shape=(d_in,), activation='relu'))
 	model.add(Dropout(dropout_prob))
+
+	for layer in range(N_hidden - 2):
+		model.add(Dense(d_hidden, activation='relu'))
+		model.add(Dropout(dropout_prob))
+
 	model.add(Dense(product(output_shape)))
 	model.add(Reshape(output_shape))
 	return model
