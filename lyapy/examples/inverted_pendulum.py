@@ -1,7 +1,9 @@
 """Inverted pendulum example."""
 
+from cvxpy import Maximize, Problem, Variable
 from matplotlib.pyplot import figure, grid, legend, plot, show, subplot, suptitle, title
-from numpy import arange, array, concatenate, identity, ones, sin
+from numpy import arange, array, concatenate, dot, identity, ones, sin
+from numpy.linalg import norm
 from numpy.random import uniform
 from scipy.io import loadmat
 
@@ -52,14 +54,14 @@ class InvertedPendulumOutput(RoboticSystemOutput):
 	and theta_dot_d are interpolated from a sequence of desired states, x_d.
 
 	Attributes:
-    List of relative degrees, vector_relative_degree: int list
-    Permutation indices, permutation_idxs: numpy array (2,)
-    Reverse permutation indices, reverse_permutation_idxs: numpy array (2,)
-    Indices of k outputs when eta in block form, relative_degree_idxs: numpy array (1,)
-    Indices of permutation into form with highest order derivatives in block, blocking_idxs: numpy array (2,)
-    Indices of reverse permutation into form with highest order derivatives in block, unblocking_idxs: numpy array (2,)
-    Linear output update matrix after decoupling inversion and drift removal, F: numpy array (2, 2)
-    Linear output actuation matrix after decoupling inversion and drift removal, G: numpy array (2, 1)
+	List of relative degrees, vector_relative_degree: int list
+	Permutation indices, permutation_idxs: numpy array (2,)
+	Reverse permutation indices, reverse_permutation_idxs: numpy array (2,)
+	Indices of k outputs when eta in block form, relative_degree_idxs: numpy array (1,)
+	Indices of permutation into form with highest order derivatives in block, blocking_idxs: numpy array (2,)
+	Indices of reverse permutation into form with highest order derivatives in block, unblocking_idxs: numpy array (2,)
+	Linear output update matrix after decoupling inversion and drift removal, F: numpy array (2, 2)
+	Linear output actuation matrix after decoupling inversion and drift removal, G: numpy array (2, 1)
 	"""
 
 	def __init__(self, inverted_pendulum, ts, x_ds):
@@ -88,7 +90,7 @@ class InvertedPendulumOutput(RoboticSystemOutput):
 
 # System parameters
 m_hat, g, l_hat = 0.25, 9.81, 0.5 # Estimated parameters
-delta = 0.5 # Max parameter variation
+delta = 0.2 # Max parameter variation
 m = uniform((1 - delta) * m_hat, (1 + delta) * m_hat) # True mass
 l = uniform((1 - delta) * l_hat, (1 + delta) * l_hat) # True length
 system = InvertedPendulum(m_hat, g, l_hat) # Estimated system
@@ -209,6 +211,56 @@ xs, ts, _, _, u_noms, u_perts, V_dot_rs = train_data
 a_trues = array([lyapunov_function_true.decoupling(x, t) - lyapunov_function.decoupling(x, t) for x, t in zip(xs, ts)])
 b_trues = array([lyapunov_function_true.drift(x, t) - lyapunov_function.drift(x, t) for x, t in zip(xs, ts)])
 V_dot_r_trues = array([lyapunov_function_true.V_dot(x, u_nom + u_pert, t) - lyapunov_function.V_dot(x, u_nom, t) for x, u_nom, u_pert, t in zip(xs, u_noms, u_perts, ts)])
+
+# Calculating point-wise bound on the residual error
+def error_bound(L_A, L_b, A_infinity, b_infinity, data, grad_V, eta_jac, decoupling, a_hat, b_hat, controller):
+	xs, ts, u_noms, u_perts, V_dot_rs = data
+	m = u_noms.shape[1]
+
+	a_hats = [a_hat(x_train, t_train) for x_train, t_train  in zip(xs, ts)]
+	b_hats = [b_hat(x_train, t_train) for x_train, t_train  in zip(xs, ts)]
+	grad_Vs = [grad_V(x_train, t_train) for x_train, t_train in zip(xs, ts)]
+	eta_jacs = [eta_jac(x_train, t_train) for x_train, t_train in zip(xs, ts)]
+	V_dot_r_hats = [dot(decoupling(x_train, t_train ), u_pert) + dot(a_hat.T, u_nom + u_pert) + b_hat for x_train, t_train, u_nom, u_pert, a_hat, b_hat in zip(xs, ts, u_noms, u_perts, a_hats, b_hats)]
+
+	def opt(x, t):
+		a = Variable(m)
+		b = Variable(1)
+		obj = Maximize(a * controller.u(x, t) + b)
+		cons = []
+
+		a_hat_test = a_hat(x, t)
+		b_hat_test = b_hat(x, t)
+		grad_V_test = grad_V(x, t)
+		eta_jac_test = eta_jac(x, t)
+		for a_hat_train, b_hat_train, grad_V_train, eta_jac_train, u_nom, u_pert, V_dot_r_hat, V_dot_r, x_train in zip(a_hats, b_hats, grad_Vs, eta_jacs, u_noms, u_perts, V_dot_r_hats, V_dot_rs, xs):
+				u = u_nom + u_pert
+				error_obs = abs(V_dot_r - V_dot_r_hat)
+				error_model = abs(dot((a_hat_test - a_hat_train).T, u) + b_hat_test - b_hat_train)
+				error_inf = norm(dot(grad_V_train, eta_jac_train) - dot(grad_V_test, eta_jac_test))
+				error_inf = error_inf * (A_infinity * norm(u) + b_infinity)
+				error_lip = min(norm(dot(grad_V_train, eta_jac_train)), norm(dot(grad_V_test, eta_jac_test)))*norm(x_train - x)
+				error_lip = error_lip * (L_A * norm(u) + L_b)
+
+				cons += [a * u + b <= error_obs + error_model + error_inf + error_lip]
+				cons += [a * u + b >= -(error_obs + error_model + error_inf + error_lip)]
+
+		prob = Problem(obj, cons)
+		prob.solve(solver='ECOS')
+		return a.value, b.value
+	return opt
+
+eta_jac = lambda x, t: identity(2)
+m_guess = (1 - delta) * m_hat
+l_guess = (1 - delta) * l_hat
+A_infinity = abs(1/(m_guess*(l_guess**2)) - 1/(m_hat*(l_hat**2)))
+b_infinity = abs(g*(1/l_guess - 1/l_hat))
+L_A = 0
+L_b = b_infinity
+data = xs, ts, u_noms, u_perts, V_dot_rs
+opt = error_bound(L_A, L_b, A_infinity, b_infinity, data, lyapunov_function.grad_V, eta_jac, lyapunov_function.decoupling, a, b, total_controller)
+a_max, b_max = opt(uniform(0.9 * xs[len(xs) - 50], 1.1 * xs[len(xs) - 50]), ts[len(ts) - 50])
+print(a_max, b_max)
 
 figure()
 suptitle('Episode data', fontsize=16)
