@@ -33,7 +33,7 @@ class LinearizingFeedbackController(Controller):
         self.select = feedback_linearizable_output.select
         self.K = K
 
-    def u(self, x, t):
+    def u(self, x, t, update=True):
         eta = self.output.eta(x, t)
         drift = self.select(self.permute(self.drift(x, t)))
         decoupling = self.select(self.permute(self.decoupling(x, t)))

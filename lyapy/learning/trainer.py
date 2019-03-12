@@ -116,7 +116,7 @@ class Trainer:
 
         pass
 
-    def update_log(self, log, train_data, a, b):
+    def update_log(self, log, train_data, a, b, deltas):
         """Update log.
 
         Let T be the number of training data points.
@@ -128,6 +128,7 @@ class Trainer:
         Latest training data, train_data: numpy array (T, n) * numpy array (T,) * numpy array (T, m) * numpy array (T, s) * numpy array (T, m) * numpy array (T, m) * numpy array (T,)
         Decoupling model, a: model (R^n * R -> R^m)
         Drift model, b: model (R^n * R -> R)
+        Slack variables, deltas: numpy (T,)
         """
 
         return log
@@ -161,11 +162,11 @@ class Trainer:
         for episode, (weight, width) in enumerate(zip(weights, widths)):
             print('EPISODE', episode)
 
-            exp_data = handler.run(weight, width, a, b)
+            exp_data, deltas = handler.run(weight, width, a, b)
             _train_data = self.process(exp_data)
             train_data = self.aggregate(train_data, _train_data)
             a, b = self.fit(train_data)
-            log = self.update_log(log, _train_data, a, b)
+            log = self.update_log(log, _train_data, a, b, deltas)
 
         return a, b, train_data, log
 

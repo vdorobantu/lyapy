@@ -47,11 +47,14 @@ class ControlSystem(System):
         """
 
         T = len(t_eval) - 1
-        n, m = len(x_0), len(controller.u(x_0, t_eval[0]))
+        n, m = len(x_0), len(controller.u(x_0, t_eval[0], False))
 
         xs = zeros((T, n))
         us = zeros((T, m))
         ts = zeros((T,))
+
+        # Smoothing
+        controller.reset()
 
         for k, (t_0, t_1) in enumerate(zip(t_eval[:-1], t_eval[1:])):
             t_span = array([t_0, t_1])

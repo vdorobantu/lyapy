@@ -71,13 +71,18 @@ class KerasTrainer(Trainer):
         return tuple(_data[perm] for _data in data)
 
     def init_log(self):
-        return (zeros((0, self.m)), zeros(0))
+        return ((zeros((0, self.m)), zeros(0), zeros(0)), ([], []))
 
-    def update_log(self, log, train_data, a, b):
+    def update_log(self, log, train_data, a, b, deltas):
         _, _, _, inputs, _, _, _ = train_data
         a_predicts = a.predict(inputs)
         b_predicts = b.predict(inputs)[:, 0]
-        return self.aggregate(log, (a_predicts, b_predicts))
+        data_log, (a_log, b_log) = log
+        data_log = self.aggregate(data_log, (a_predicts, b_predicts, deltas))
+        a_log.append(a)
+        b_log.append(b)
+        log = (data_log, (a_log, b_log))
+        return log
 
     def fit(self, train_data):
         _, _, decouplings, inputs, u_noms, u_perts, V_dot_rs = self.shuffle(train_data)
@@ -86,7 +91,7 @@ class KerasTrainer(Trainer):
         a = multi_layer_nn(self.s, self.d_hidden, self.N_hidden, (self.m,))
         b = multi_layer_nn(self.s, self.d_hidden, self.N_hidden, (1,))
         model = connect_models(a, b)
-        model.compile('adam', 'mean_squared_error')
+        model.compile('adam', 'mean_absolute_error')
 
         model.fit([decouplings, inputs, u_noms, u_perts], V_dot_rs, callbacks=self.callbacks, epochs=self.max_epochs, batch_size=batch_size, validation_split=self.validation_split)
 
