@@ -8,7 +8,7 @@ class Handler:
     Override run.
     """
 
-    def run(self, weight, a, b):
+    def run(self, weight, width, a, b):
         """Run an experiment.
 
         Let T be the number of data points in an experiment.
@@ -17,6 +17,7 @@ class Handler:
 
         Inputs:
         Weight of augmenting controller, weight: float
+        Width of perturbing controller, width: float
         Lyapunov function decoupling model, a: model (R^n * R -> R^m)
         Lyapunov function drift model, b: model (R^n * R -> R)
         """

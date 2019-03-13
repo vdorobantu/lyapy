@@ -8,7 +8,7 @@ from numpy.random import uniform
 from scipy.io import loadmat
 
 from ..controllers import PDController, QPController, CombinedController
-from ..learning import evaluator, KerasTrainer, SimulationHandler
+from ..learning import decay_widths, evaluator, KerasTrainer, sigmoid_weighting, SimulationHandler
 from ..lyapunov_functions import QuadraticControlLyapunovFunction
 from ..outputs import RoboticSystemOutput
 from ..systems import AffineControlSystem
@@ -138,17 +138,20 @@ offset = 0.1 # Perturbation offset
 d_hidden = 200 # Hidden layer dimension
 C = 1e3 # Augmenting controller slack weight
 weight_final = 0.99
+add_episodes = 0
 
 # Numerical differentiation filter
 diff_window = 3
 
 # Run experiments in simulation
-handler = SimulationHandler(system_true, output, pd_controller, m, lyapunov_function, x_0, t_eval, subsample_rate, width, input, C, scaling, offset)
+handler = SimulationHandler(system_true, output, pd_controller, m, lyapunov_function, x_0, t_eval, subsample_rate, input, C, scaling, offset)
 # Set up episodic learning with Keras
 trainer = KerasTrainer(input, lyapunov_function, diff_window, subsample_rate, n, s, m, d_hidden, loss_threshold, max_epochs, batch_fraction, validation_split)
+weights = sigmoid_weighting(num_episodes, weight_final)
+widths = width * ones(num_episodes)
 
 # Train and build augmented controller
-a, b, train_data, (a_predicts, b_predicts) = trainer.run(handler, num_episodes, weight_final)
+a, b, train_data, (a_predicts, b_predicts) = trainer.run(handler, weights, widths)
 a = evaluator(input, a)
 b = evaluator(input, b, scalar_output=True)
 aug_controller = QPController.build_aug(pd_controller, m, lyapunov_function, a, b, C)

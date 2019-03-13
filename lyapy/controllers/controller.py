@@ -1,5 +1,7 @@
 """Base class for controllers."""
 
+from numpy import array
+
 class Controller:
     """Base class for controllers.
 
@@ -19,7 +21,7 @@ class Controller:
         """
         self.output = output
 
-    def u(self, x, t):
+    def u(self, x, t, update=True):
         """Compute a control action.
 
         Outputs a numpy array (m,).
@@ -27,5 +29,30 @@ class Controller:
         Inputs:
         State, x: numpy array (n,)
         Time, t: float
+        Internal state update flag, update: bool
         """
+
         pass
+
+    def reset(self):
+        """Reset internal state of controller."""
+
+        pass
+
+    def evaluate(self, xs, ts):
+        """Evaluate controller at given states and times.
+
+        Let n be the number of states, m be the number of inputs, T be the
+        number of states and times.
+
+        Outputs a numpy array (T, m).
+
+        Inputs:
+        States, xs: numpy array (T, n)
+        Times, ts: numpy array (T,)
+        """
+
+        self.reset()
+        us = array([self.u(x, t) for x, t in zip(xs, ts)])
+
+        return us

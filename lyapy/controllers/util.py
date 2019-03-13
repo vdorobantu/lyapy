@@ -1,6 +1,6 @@
 """Utilities for control design"""
 
-from numpy import array, dot, identity, Inf, reshape, tile, zeros
+from numpy import array, dot, identity, Inf, max, min, ones, reshape, tensordot, tile, zeros
 from numpy.linalg import norm, solve
 from numpy.random import uniform
 
@@ -44,7 +44,7 @@ def solve_control_qp(m, P=None, q=None, r=0, a=None, b=0, C=Inf):
 	quad = dot(a, solve(P, a))
 
 	if any(a != 0):
-			lambda_cons = max(0, (b - dot(P_inv_q, a)) / (quad + 1 / (C * quad)))
+			lambda_cons = max([0, (b - dot(P_inv_q, a)) / (quad + 1 / (C * quad))])
 			u = -solve(P, q + lambda_cons * a)
 			delta = lambda_cons / (C * quad)
 	else:
@@ -54,7 +54,7 @@ def solve_control_qp(m, P=None, q=None, r=0, a=None, b=0, C=Inf):
 				raise(Exception('QP infeasible'))
 			delta = None
 		else:
-			delta = max(0, b)
+			delta = max([0, b])
 
 	return u, delta
 
@@ -86,9 +86,20 @@ class CombinedController(Controller):
 		self.controllers = controllers
 		self.weights = weights
 
-	def u(self, x, t):
-		us = array([controller.u(x, t) for controller in self.controllers]).T
+	def u(self, x, t, update=True):
+		us = array([controller.u(x, t, update) for controller in self.controllers]).T
 		return dot(us, self.weights)
+
+	def evaluate(self, xs, ts):
+		self.reset()
+		us = array([controller.evaluate(xs, ts) for controller in self.controllers])
+		us = tensordot(self.weights, us, [0, 0])
+		return us
+
+	def reset(self):
+		for controller in self.controllers:
+			controller.reset()
+
 
 class ConstantController(Controller):
 	"""Constant control action.
@@ -110,7 +121,7 @@ class ConstantController(Controller):
 		Controller.__init__(self, output)
 		self.u_0 = u_0
 
-	def u(self, x, t):
+	def u(self, x, t, update=True):
 		return self.u_0
 
 class PerturbingController(Controller):
@@ -147,8 +158,25 @@ class PerturbingController(Controller):
 		self.scaling = scaling
 		self.offset = offset
 
-	def u(self, x, t):
-		return self.us[t] * (self.offset + self.scaling * norm(self.controller.u(x, t)))
+	def _u(self, x, t, update):
+		"""Compute underlying control input with/without update flag.
+
+		Returns a numpy array (m,)
+
+		Inputs:
+		State, x: numpy array (n,)
+		Time, t: float
+		Update flag, update: bool
+		"""
+
+		return self.us[t] * (self.offset + self.scaling * norm(self.controller.u(x, t, update)))
+
+	def u(self, x, t, update=True):
+		return self._u(x, t, False)
+
+	def evaluate(self, xs, ts):
+		self.controller.reset()
+		return array([self._u(x, t, True) for x, t in zip(xs, ts)])
 
 	def build(output, controller, t_eval, m, subsample_rate, width, scaling=1, offset=0):
 		"""Build a PerturbingController object.
@@ -178,3 +206,51 @@ class PerturbingController(Controller):
 		perturbations = uniform(-width, width, (len(t_eval) // subsample_rate, m))
 		perturbations = reshape(tile(perturbations, [1, subsample_rate]), (-1, m))
 		return PerturbingController(output, controller, t_eval, perturbations, scaling, offset)
+
+class SaturationController(Controller):
+	"""Controller incorporating element-wise saturation limits.
+
+	Let m be the number of inputs.
+
+	Attributes:
+	Control task output, output: Output
+	Baseline controller, controller: Controller
+	Lower element-wise control bounds, lower_bounds: numpy array (m,)
+	Upper element-wise control bounds, upper_bounds: numpy array (m,)
+	"""
+
+	def __init__(self, output, controller, m, lower_bounds=None, upper_bounds=None):
+		"""Initialize a SaturationController object.
+
+		Inputs:
+		Control task output, output: Output
+		Baseline controller, controller: Controller
+		Number of control inputs, m: int
+		Lower element-wise control bounds, lower_bounds: numpy array (m,)
+		Upper element-wise control bounds, upper_bounds: numpy array (m,)
+		"""
+
+		Controller.__init__(self, output)
+
+		if lower_bounds is None:
+			lower_bounds = -Inf * ones(m)
+		if upper_bounds is None:
+			upper_bounds = Inf * ones(m)
+
+		self.controller = controller
+		self.lower_bounds = lower_bounds
+		self.upper_bounds = upper_bounds
+
+	def saturate(self, u):
+		"""Saturate control input.
+
+		Returns a numpy array (m,)
+
+		Inputs:
+		Unsaturated control input, u: numpy array (m,)
+		"""
+
+		return min([max([self.lower_bounds, u], axis=0), self.upper_bounds], axis=0)
+
+	def u(self, x, t, update=True):
+		return self.saturate(self.controller.u(x, t, update))

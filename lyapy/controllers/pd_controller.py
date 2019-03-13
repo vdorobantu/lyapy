@@ -28,7 +28,7 @@ class PDController(Controller):
         self.K_p = K_p
         self.K_d = K_d
 
-    def u(self, x, t):
+    def u(self, x, t, update=True):
         e_p = self.output.proportional(x, t)
         e_d = self.output.derivative(x, t)
         return dot(self.K_p, e_p) + dot(self.K_d, e_d)

@@ -7,10 +7,11 @@ LinearizingFeedbackController - Linearizing feedback controller for feedback lin
 PDController - Proportional-derivative controller for PD outputs.
 PerturbingController - Predetermined time-based controller, scaled by norm of baseline controller.
 QPController - Quadratic program controller.
+SaturatingController - Controller incorporating element-wise saturation limits.
 """
 
 from .controller import Controller
 from .linearizing_feedback_controller import LinearizingFeedbackController
 from .pd_controller import PDController
 from .qp_controller import QPController
-from .util import CombinedController, ConstantController, PerturbingController
+from .util import CombinedController, ConstantController, PerturbingController, SaturationController
