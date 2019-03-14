@@ -5,3 +5,4 @@ __pycache__
 *.mat
 *.mov
 *.mp4
+*.npz

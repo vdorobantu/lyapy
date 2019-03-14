@@ -2,9 +2,9 @@
 
 from cvxpy import Maximize, Problem, Variable
 from matplotlib.pyplot import figure, grid, legend, plot, show, subplot, suptitle, title
-from numpy import arange, array, concatenate, dot, identity, ones, sin
+from numpy import arange, array, concatenate, dot, identity, ones, savez, sin, zeros
 from numpy.linalg import norm
-from numpy.random import uniform
+from numpy.random import uniform, multivariate_normal
 from scipy.io import loadmat
 
 from ..controllers import PDController, QPController, CombinedController
@@ -90,15 +90,16 @@ class InvertedPendulumOutput(RoboticSystemOutput):
 
 # System parameters
 m_hat, g, l_hat = 0.25, 9.81, 0.5 # Estimated parameters
-delta = 0.2 # Max parameter variation
-m = uniform((1 - delta) * m_hat, (1 + delta) * m_hat) # True mass
-l = uniform((1 - delta) * l_hat, (1 + delta) * l_hat) # True length
+delta = 0.1 # Max parameter variation
+# m = uniform((1 - delta) * m_hat, (1 + delta) * m_hat) # True mass
+# l = uniform((1 - delta) * l_hat, (1 + delta) * l_hat) # True length
+m, l = 0.2650362798572108, 0.5287463881925855
 system = InvertedPendulum(m_hat, g, l_hat) # Estimated system
 system_true = InvertedPendulum(m, g, l) # Actual system
 
 # Control design parameters
-K_p = array([[-10]]) # PD controller P gain
-K_d = array([[-1]]) # PD controller D gain
+K_p = array([[-2.5]]) # PD controller P gain
+K_d = array([[-0.375]]) # PD controller D gain
 n = 2 # Number of states
 m = 1 # Number of inputs
 Q = identity(n) # Positive definite Q for CARE
@@ -126,8 +127,8 @@ input = lambda x, t: concatenate([x, lyapunov_function.grad_V(x, t)[-output.k:]]
 s = n + output.k
 
 # Learning loop
-num_episodes = 20 # Number of episodes of simulation/training
-loss_threshold = 1e-4 # Training loss threshold for an episode
+num_episodes = 10 # Number of episodes of simulation/training
+loss_threshold = 1e-3 # Training loss threshold for an episode
 max_epochs = 5000 # Maximum number of training epochs per episode
 batch_fraction = 0.1
 validation_split = 0.1 # Percentage of training data withheld for validation
@@ -136,6 +137,7 @@ width = 0.1 # Width of uniform distribution of perturbations
 scaling = 1
 offset = 0.1 # Perturbation offset
 d_hidden = 200 # Hidden layer dimension
+N_hidden = 1
 C = 1e3 # Augmenting controller slack weight
 weight_final = 0.99
 add_episodes = 0
@@ -144,14 +146,15 @@ add_episodes = 0
 diff_window = 3
 
 # Run experiments in simulation
-handler = SimulationHandler(system_true, output, pd_controller, m, lyapunov_function, x_0, t_eval, subsample_rate, input, C, scaling, offset)
+handler = SimulationHandler(system_true, output, pd_controller, m, lyapunov_function, x_0, t_eval, subsample_rate, input, C, scaling=scaling, offset=offset)
 # Set up episodic learning with Keras
-trainer = KerasTrainer(input, lyapunov_function, diff_window, subsample_rate, n, s, m, d_hidden, loss_threshold, max_epochs, batch_fraction, validation_split)
+trainer = KerasTrainer(input, lyapunov_function, diff_window, subsample_rate, n, s, m, d_hidden, N_hidden, loss_threshold, max_epochs, batch_fraction, validation_split)
 weights = sigmoid_weighting(num_episodes, weight_final)
 widths = width * ones(num_episodes)
 
 # Train and build augmented controller
-a, b, train_data, (a_predicts, b_predicts) = trainer.run(handler, weights, widths)
+a, b, train_data, log = trainer.run(handler, weights, widths)
+(a_predicts, b_predicts, deltas), (a_logs, b_logs) = log
 a = evaluator(input, a)
 b = evaluator(input, b, scalar_output=True)
 aug_controller = QPController.build_aug(pd_controller, m, lyapunov_function, a, b, C)
@@ -163,6 +166,7 @@ lyapunov_function_true = QuadraticControlLyapunovFunction.build_care(output_true
 
 # Nominal QP controller simulation
 ts, xs = system_true.simulate(x_0, qp_controller, t_eval)
+x_qps = xs
 
 figure()
 plot(ts, xs, linewidth=2)
@@ -173,6 +177,7 @@ grid()
 
 # PD controller simulation
 ts, xs = system_true.simulate(x_0, pd_controller, t_eval)
+x_pds = xs
 
 figure()
 plot(ts, xs, linewidth=2)
@@ -183,6 +188,7 @@ grid()
 
 # Augmented controller simulation
 ts, xs = system_true.simulate(x_0, total_controller, t_eval)
+x_augs = xs
 
 figure()
 plot(ts, xs, linewidth=2)
@@ -227,6 +233,8 @@ def error_bound(L_A, L_b, A_infinity, b_infinity, data, grad_V, eta_jac, decoupl
 	V_dot_r_hats = [dot(decoupling(x_train, t_train ), u_pert) + dot(a_hat.T, u_nom + u_pert) + b_hat for x_train, t_train, u_nom, u_pert, a_hat, b_hat in zip(xs, ts, u_noms, u_perts, a_hats, b_hats)]
 
 	def opt(x, t):
+		print(t)
+
 		a = Variable(m)
 		b = Variable(1)
 		obj = Maximize(a * controller.u(x, t) + b)
@@ -236,17 +244,25 @@ def error_bound(L_A, L_b, A_infinity, b_infinity, data, grad_V, eta_jac, decoupl
 		b_hat_test = b_hat(x, t)
 		grad_V_test = grad_V(x, t)
 		eta_jac_test = eta_jac(x, t)
-		for a_hat_train, b_hat_train, grad_V_train, eta_jac_train, u_nom, u_pert, V_dot_r_hat, V_dot_r, x_train in zip(a_hats, b_hats, grad_Vs, eta_jacs, u_noms, u_perts, V_dot_r_hats, V_dot_rs, xs):
-				u = u_nom + u_pert
-				error_obs = abs(V_dot_r - V_dot_r_hat)
-				error_model = abs(dot((a_hat_test - a_hat_train).T, u) + b_hat_test - b_hat_train)
-				error_inf = norm(dot(grad_V_train, eta_jac_train) - dot(grad_V_test, eta_jac_test))
-				error_inf = error_inf * (A_infinity * norm(u) + b_infinity)
-				error_lip = min(norm(dot(grad_V_train, eta_jac_train)), norm(dot(grad_V_test, eta_jac_test)))*norm(x_train - x)
-				error_lip = error_lip * (L_A * norm(u) + L_b)
 
-				cons += [a * u + b <= error_obs + error_model + error_inf + error_lip]
-				cons += [a * u + b >= -(error_obs + error_model + error_inf + error_lip)]
+		def opt_terms(a_hat_train, b_hat_train, grad_V_train, eta_jac_train, u_nom, u_pert, V_dot_r_hat, V_dot_r, x_train):
+			u = u_nom + u_pert
+			error_obs = abs(V_dot_r - V_dot_r_hat)
+			error_model = abs(dot((a_hat_test - a_hat_train).T, u) + b_hat_test - b_hat_train)
+			error_inf = norm(dot(grad_V_train, eta_jac_train) - dot(grad_V_test, eta_jac_test))
+			error_inf = error_inf * (A_infinity * norm(u) + b_infinity)
+			error_lip = min(norm(dot(grad_V_train, eta_jac_train)), norm(dot(grad_V_test, eta_jac_test)))*norm(x_train - x)
+			error_lip = error_lip * (L_A * norm(u) + L_b)
+			return concatenate([u, ones(1)]), error_obs + error_model + error_inf + error_lip
+
+		zipped = zip(a_hats, b_hats, grad_Vs, eta_jacs, u_noms, u_perts, V_dot_r_hats, V_dot_rs, xs)
+		terms = [opt_terms(*params) for params in zipped]
+		linear, affine = zip(*terms)
+		linear = array(linear)
+		linear = concatenate([linear, -linear])
+		affine = array(affine)
+		affine = concatenate([affine, affine])
+		cons = [linear[:, :-1] * a + linear[:, -1] * b <= affine]
 
 		prob = Problem(obj, cons)
 		prob.solve(solver='ECOS')
@@ -261,9 +277,74 @@ b_infinity = abs(g*(1/l_guess - 1/l_hat))
 L_A = 0
 L_b = b_infinity
 data = xs, ts, u_noms, u_perts, V_dot_rs
-opt = error_bound(L_A, L_b, A_infinity, b_infinity, data, lyapunov_function.grad_V, eta_jac, lyapunov_function.decoupling, a, b, total_controller)
-a_max, b_max = opt(uniform(0.9 * xs[len(xs) - 50], 1.1 * xs[len(xs) - 50]), ts[len(ts) - 50])
-print(a_max, b_max)
+
+a_0 = lambda x, t: zeros(1)
+b_0 = lambda x, t: 0
+
+aug = error_bound(L_A, L_b, A_infinity, b_infinity, data, lyapunov_function.grad_V, eta_jac, lyapunov_function.decoupling, a, b, total_controller)
+qp = error_bound(L_A, L_b, A_infinity, b_infinity, data, lyapunov_function.grad_V, eta_jac, lyapunov_function.decoupling, a_0, b_0, qp_controller)
+pd = error_bound(L_A, L_b, A_infinity, b_infinity, data, lyapunov_function.grad_V, eta_jac, lyapunov_function.decoupling, a_0, b_0, pd_controller)
+
+from matplotlib.pyplot import colorbar, get_cmap, scatter, xlabel, ylabel
+
+reps = 5
+cov = (0.1 ** 2) * identity(n)
+x_samples = concatenate([multivariate_normal(x, cov, reps) for x in xs])
+t_samples = concatenate([ones(reps) * t for t in ts])
+
+print('Computing bounds for augmented controller...')
+maxs = [aug(x_sample, t_sample) for x_sample, t_sample in zip(x_samples, t_samples)]
+a_maxs, b_maxs = zip(*maxs)
+a_maxs = array(a_maxs)
+b_maxs = array(b_maxs)
+u_maxs = array([total_controller.u(x_sample, t_sample) for x_sample, t_sample in zip(x_samples, t_samples)])
+upper_bounds = array([dot(a_max, u_max) + b_max[0] for a_max, b_max, u_max in zip(a_maxs, b_maxs, u_maxs)])
+
+savez('./output/aug_data.npz', samples=x_samples, upper_bounds=upper_bounds, xs=x_augs)
+
+print('Computing bounds for QP controller...')
+maxs = [qp(x_sample, t_sample) for x_sample, t_sample in zip(x_samples, t_samples)]
+a_maxs, b_maxs = zip(*maxs)
+a_maxs = array(a_maxs)
+b_maxs = array(b_maxs)
+u_maxs = array([qp_controller.u(x_sample, t_sample) for x_sample, t_sample in zip(x_samples, t_samples)])
+upper_bounds = array([dot(a_max, u_max) + b_max[0] for a_max, b_max, u_max in zip(a_maxs, b_maxs, u_maxs)])
+
+savez('./output/qp_data.npz', samples=x_samples, upper_bounds=upper_bounds, xs=x_qps)
+
+print('Computing bounds for PD controller...')
+maxs = [pd(x_sample, t_sample) for x_sample, t_sample in zip(x_samples, t_samples)]
+a_maxs, b_maxs = zip(*maxs)
+a_maxs = array(a_maxs)
+b_maxs = array(b_maxs)
+u_maxs = array([pd_controller.u(x_sample, t_sample) for x_sample, t_sample in zip(x_samples, t_samples)])
+upper_bounds = array([dot(a_max, u_max) + b_max[0] for a_max, b_max, u_max in zip(a_maxs, b_maxs, u_maxs)])
+
+savez('./output/pd_data.npz', samples=x_samples, upper_bounds=upper_bounds, xs=x_pds)
+
+# figure()
+# title('Training data upper bounds', fontsize=16)
+# bounds = scatter(x_samples[:, 0], x_samples[:, 1], c=upper_bounds, cmap=get_cmap('jet'))
+# colorbar(bounds)
+# plot(x_ds[:, 0], x_ds[:, 1], '--k', linewidth=2)
+# xlabel('$\\theta$', fontsize=16)
+# ylabel('$\\dot{\\theta}$', fontsize=16)
+# grid()
+
+# t_ds = t_eval[::subsample_rate]
+# x_ds = array([output.r(t) for t in t_ds])
+# maxs = [opt(x_d, t_d) for x_d, t_d in zip(x_ds, t_ds)]
+# a_maxs, b_maxs = zip(*maxs)
+# a_maxs = array(a_maxs)
+# b_maxs = array(b_maxs)
+# u_maxs = array([total_controller.u(x_d, t_d) for x_d, t_d in zip(x_ds, t_ds)])
+# upper_bounds = array([dot(a_max, u_max) + b_max[0] for a_max, b_max, u_max in zip(a_maxs, b_maxs, u_maxs)])
+#
+# figure()
+# title('Desired trajectory upper bounds', fontsize=16)
+# bounds = scatter(x_ds[:, 0], x_ds[:, 1], c=upper_bounds, cmap=get_cmap('jet'))
+# colorbar(bounds)
+# grid()
 
 figure()
 suptitle('Episode data', fontsize=16)
@@ -297,5 +378,7 @@ plot(b_predicts, label='$\\widehat{b}$', linewidth=2)
 plot(b_trues, '--', label='$b$', linewidth=2)
 legend(fontsize=16)
 grid()
+
+print(system_true.m, system_true.l)
 
 show()
