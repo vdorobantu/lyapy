@@ -127,7 +127,7 @@ input = lambda x, t: concatenate([x, lyapunov_function.grad_V(x, t)[-output.k:]]
 s = n + output.k
 
 # Learning loop
-num_episodes = 10 # Number of episodes of simulation/training
+num_episodes = 1 # Number of episodes of simulation/training
 loss_threshold = 1e-3 # Training loss threshold for an episode
 max_epochs = 5000 # Maximum number of training epochs per episode
 batch_fraction = 0.1
@@ -287,7 +287,7 @@ pd = error_bound(L_A, L_b, A_infinity, b_infinity, data, lyapunov_function.grad_
 
 from matplotlib.pyplot import colorbar, get_cmap, scatter, xlabel, ylabel
 
-reps = 5
+reps = 10
 cov = (0.1 ** 2) * identity(n)
 x_samples = concatenate([multivariate_normal(x, cov, reps) for x in xs])
 t_samples = concatenate([ones(reps) * t for t in ts])
@@ -299,8 +299,11 @@ a_maxs = array(a_maxs)
 b_maxs = array(b_maxs)
 u_maxs = array([total_controller.u(x_sample, t_sample) for x_sample, t_sample in zip(x_samples, t_samples)])
 upper_bounds = array([dot(a_max, u_max) + b_max[0] for a_max, b_max, u_max in zip(a_maxs, b_maxs, u_maxs)])
+a_acts = array([lyapunov_function_true.decoupling(x_sample, t_sample) - lyapunov_function.decoupling(x_sample, t_sample) - a(x_sample, t_sample) for x_sample, t_sample in zip(x_samples, t_samples)])
+b_acts = array([lyapunov_function_true.drift(x_sample, t_sample) - lyapunov_function.drift(x_sample, t_sample) - b(x_sample, t_sample) for x_sample, t_sample in zip(x_samples, t_samples)])
+acts = array([dot(a_act, u_max) + b_act for a_act, b_act, u_max in zip(a_acts, b_acts, u_maxs)])
 
-savez('./output/aug_data.npz', samples=x_samples, upper_bounds=upper_bounds, xs=x_augs)
+savez('./output/aug_data.npz', samples=x_samples, upper_bounds=upper_bounds, acts=acts, xs=x_augs)
 
 print('Computing bounds for QP controller...')
 maxs = [qp(x_sample, t_sample) for x_sample, t_sample in zip(x_samples, t_samples)]
@@ -309,18 +312,21 @@ a_maxs = array(a_maxs)
 b_maxs = array(b_maxs)
 u_maxs = array([qp_controller.u(x_sample, t_sample) for x_sample, t_sample in zip(x_samples, t_samples)])
 upper_bounds = array([dot(a_max, u_max) + b_max[0] for a_max, b_max, u_max in zip(a_maxs, b_maxs, u_maxs)])
+a_acts = array([lyapunov_function_true.decoupling(x_sample, t_sample) - lyapunov_function.decoupling(x_sample, t_sample) for x_sample, t_sample in zip(x_samples, t_samples)])
+b_acts = array([lyapunov_function_true.drift(x_sample, t_sample) - lyapunov_function.drift(x_sample, t_sample) for x_sample, t_sample in zip(x_samples, t_samples)])
+acts = array([dot(a_act, u_max) + b_act for a_act, b_act, u_max in zip(a_acts, b_acts, u_maxs)])
 
-savez('./output/qp_data.npz', samples=x_samples, upper_bounds=upper_bounds, xs=x_qps)
+savez('./output/qp_data.npz', samples=x_samples, upper_bounds=upper_bounds, acts=acts, xs=x_qps)
 
-print('Computing bounds for PD controller...')
-maxs = [pd(x_sample, t_sample) for x_sample, t_sample in zip(x_samples, t_samples)]
-a_maxs, b_maxs = zip(*maxs)
-a_maxs = array(a_maxs)
-b_maxs = array(b_maxs)
-u_maxs = array([pd_controller.u(x_sample, t_sample) for x_sample, t_sample in zip(x_samples, t_samples)])
-upper_bounds = array([dot(a_max, u_max) + b_max[0] for a_max, b_max, u_max in zip(a_maxs, b_maxs, u_maxs)])
-
-savez('./output/pd_data.npz', samples=x_samples, upper_bounds=upper_bounds, xs=x_pds)
+# print('Computing bounds for PD controller...')
+# maxs = [pd(x_sample, t_sample) for x_sample, t_sample in zip(x_samples, t_samples)]
+# a_maxs, b_maxs = zip(*maxs)
+# a_maxs = array(a_maxs)
+# b_maxs = array(b_maxs)
+# u_maxs = array([pd_controller.u(x_sample, t_sample) for x_sample, t_sample in zip(x_samples, t_samples)])
+# upper_bounds = array([dot(a_max, u_max) + b_max[0] for a_max, b_max, u_max in zip(a_maxs, b_maxs, u_maxs)])
+#
+# savez('./output/pd_data.npz', samples=x_samples, upper_bounds=upper_bounds, xs=x_pds)
 
 # figure()
 # title('Training data upper bounds', fontsize=16)
