@@ -1,8 +1,8 @@
 """Inverted pendulum example."""
 
 from cvxpy import Maximize, Problem, Variable
-from matplotlib.pyplot import figure, grid, legend, plot, show, subplot, suptitle, title
-from numpy import arange, array, concatenate, dot, identity, ones, savez, sin, zeros
+from matplotlib.pyplot import figure, grid, legend, plot, show, subplot, suptitle, title, xlabel, ylabel
+from numpy import arange, array, concatenate, dot, identity, linspace, ones, savez, sin, zeros
 from numpy.linalg import norm
 from numpy.random import uniform, multivariate_normal
 from scipy.io import loadmat
@@ -90,10 +90,11 @@ class InvertedPendulumOutput(RoboticSystemOutput):
 
 # System parameters
 m_hat, g, l_hat = 0.25, 9.81, 0.5 # Estimated parameters
-delta = 0.1 # Max parameter variation
+delta = 0.3 # Max parameter variation
 # m = uniform((1 - delta) * m_hat, (1 + delta) * m_hat) # True mass
 # l = uniform((1 - delta) * l_hat, (1 + delta) * l_hat) # True length
-m, l = 0.2650362798572108, 0.5287463881925855
+# m, l = 0.2650362798572108, 0.5287463881925855
+m, l = 0.2300511599175675, 0.6238596448897831
 system = InvertedPendulum(m_hat, g, l_hat) # Estimated system
 system_true = InvertedPendulum(m, g, l) # Actual system
 
@@ -127,20 +128,20 @@ input = lambda x, t: concatenate([x, lyapunov_function.grad_V(x, t)[-output.k:]]
 s = n + output.k
 
 # Learning loop
-num_episodes = 1 # Number of episodes of simulation/training
+num_episodes = 10 # Number of episodes of simulation/training
 loss_threshold = 1e-3 # Training loss threshold for an episode
 max_epochs = 5000 # Maximum number of training epochs per episode
 batch_fraction = 0.1
 validation_split = 0.1 # Percentage of training data withheld for validation
 subsample_rate = 20 # Number of time steps perturbations are held for
-width = 0.1 # Width of uniform distribution of perturbations
+width = 0.25 # Width of uniform distribution of perturbations
 scaling = 1
-offset = 0.1 # Perturbation offset
+offset = 0.25 # Perturbation offset
 d_hidden = 200 # Hidden layer dimension
 N_hidden = 1
 C = 1e3 # Augmenting controller slack weight
 weight_final = 0.99
-add_episodes = 0
+add_episodes = 5
 
 # Numerical differentiation filter
 diff_window = 3
@@ -149,8 +150,8 @@ diff_window = 3
 handler = SimulationHandler(system_true, output, pd_controller, m, lyapunov_function, x_0, t_eval, subsample_rate, input, C, scaling=scaling, offset=offset)
 # Set up episodic learning with Keras
 trainer = KerasTrainer(input, lyapunov_function, diff_window, subsample_rate, n, s, m, d_hidden, N_hidden, loss_threshold, max_epochs, batch_fraction, validation_split)
-weights = sigmoid_weighting(num_episodes, weight_final)
-widths = width * ones(num_episodes)
+weights = concatenate([sigmoid_weighting(num_episodes, weight_final), ones(add_episodes)])
+widths = concatenate([width * ones(num_episodes), linspace(width, 0, add_episodes)])
 
 # Train and build augmented controller
 a, b, train_data, log = trainer.run(handler, weights, widths)
@@ -177,6 +178,7 @@ grid()
 
 # PD controller simulation
 ts, xs = system_true.simulate(x_0, pd_controller, t_eval)
+t_pds = ts
 x_pds = xs
 
 figure()
@@ -188,6 +190,7 @@ grid()
 
 # Augmented controller simulation
 ts, xs = system_true.simulate(x_0, total_controller, t_eval)
+t_augs = ts
 x_augs = xs
 
 figure()
@@ -195,6 +198,15 @@ plot(ts, xs, linewidth=2)
 plot(t_ds, x_ds, '--', linewidth=2)
 title('Augmented Controller', fontsize=16)
 legend(['$\\theta$', '$\\dot{\\theta}$', '$\\theta_d$', '$\\dot{\\theta}_d$'], fontsize=16)
+grid()
+
+figure()
+plot(t_pds, x_pds[:, 0], linewidth=3, label='PD')
+plot(t_augs, x_augs[:, 0], linewidth=3, label='Augmented')
+plot(t_ds, x_ds[:, 0], '--k', linewidth=3, label='Desired')
+legend(fontsize=16)
+xlabel('Time (sec)', fontsize=16)
+ylabel('$\\theta$', fontsize=16)
 grid()
 
 # Additional evaluation plots
@@ -233,7 +245,7 @@ def error_bound(L_A, L_b, A_infinity, b_infinity, data, grad_V, eta_jac, decoupl
 	V_dot_r_hats = [dot(decoupling(x_train, t_train ), u_pert) + dot(a_hat.T, u_nom + u_pert) + b_hat for x_train, t_train, u_nom, u_pert, a_hat, b_hat in zip(xs, ts, u_noms, u_perts, a_hats, b_hats)]
 
 	def opt(x, t):
-		print(t)
+		# print(t)
 
 		a = Variable(m)
 		b = Variable(1)
@@ -265,7 +277,10 @@ def error_bound(L_A, L_b, A_infinity, b_infinity, data, grad_V, eta_jac, decoupl
 		cons = [linear[:, :-1] * a + linear[:, -1] * b <= affine]
 
 		prob = Problem(obj, cons)
-		prob.solve(solver='ECOS')
+		try:
+			prob.solve(solver='GLPK', glpk={'msg_lev': 'GLP_MSG_OFF'})
+		except Exception:
+			print('SOLVER FAILURE', 'State:', x, 'Control:', controller.u(x, t), 'Time:', t)
 		return a.value, b.value
 	return opt
 
@@ -288,69 +303,41 @@ pd = error_bound(L_A, L_b, A_infinity, b_infinity, data, lyapunov_function.grad_
 from matplotlib.pyplot import colorbar, get_cmap, scatter, xlabel, ylabel
 
 reps = 10
-cov = (0.1 ** 2) * identity(n)
+cov = (0.01 ** 2) * identity(n)
 x_samples = concatenate([multivariate_normal(x, cov, reps) for x in xs])
 t_samples = concatenate([ones(reps) * t for t in ts])
 
 print('Computing bounds for augmented controller...')
 maxs = [aug(x_sample, t_sample) for x_sample, t_sample in zip(x_samples, t_samples)]
-a_maxs, b_maxs = zip(*maxs)
+data = [(a_max, b_max, x_sample, t_sample) for (a_max, b_max), x_sample, t_sample in zip(maxs, x_samples, t_samples) if (a_max is not None and b_max is not None)]
+a_maxs, b_maxs, x_filtered_samples, t_filtered_samples = zip(*data)
 a_maxs = array(a_maxs)
 b_maxs = array(b_maxs)
-u_maxs = array([total_controller.u(x_sample, t_sample) for x_sample, t_sample in zip(x_samples, t_samples)])
+x_filtered_samples = array(x_filtered_samples)
+t_filtered_samples = array(t_filtered_samples)
+u_maxs = array([total_controller.u(x_sample, t_sample) for x_sample, t_sample in zip(x_filtered_samples, t_filtered_samples)])
 upper_bounds = array([dot(a_max, u_max) + b_max[0] for a_max, b_max, u_max in zip(a_maxs, b_maxs, u_maxs)])
-a_acts = array([lyapunov_function_true.decoupling(x_sample, t_sample) - lyapunov_function.decoupling(x_sample, t_sample) - a(x_sample, t_sample) for x_sample, t_sample in zip(x_samples, t_samples)])
-b_acts = array([lyapunov_function_true.drift(x_sample, t_sample) - lyapunov_function.drift(x_sample, t_sample) - b(x_sample, t_sample) for x_sample, t_sample in zip(x_samples, t_samples)])
+a_acts = array([lyapunov_function_true.decoupling(x_sample, t_sample) - lyapunov_function.decoupling(x_sample, t_sample) - a(x_sample, t_sample) for x_sample, t_sample in zip(x_filtered_samples, t_filtered_samples)])
+b_acts = array([lyapunov_function_true.drift(x_sample, t_sample) - lyapunov_function.drift(x_sample, t_sample) - b(x_sample, t_sample) for x_sample, t_sample in zip(x_filtered_samples, t_filtered_samples)])
 acts = array([dot(a_act, u_max) + b_act for a_act, b_act, u_max in zip(a_acts, b_acts, u_maxs)])
 
-savez('./output/aug_data.npz', samples=x_samples, upper_bounds=upper_bounds, acts=acts, xs=x_augs)
+savez('./output/aug_data.npz', samples=x_filtered_samples, upper_bounds=upper_bounds, acts=acts, xs=x_augs)
 
 print('Computing bounds for QP controller...')
 maxs = [qp(x_sample, t_sample) for x_sample, t_sample in zip(x_samples, t_samples)]
-a_maxs, b_maxs = zip(*maxs)
+data = [(a_max, b_max, x_sample, t_sample) for (a_max, b_max), x_sample, t_sample in zip(maxs, x_samples, t_samples) if (a_max is not None and b_max is not None)]
+a_maxs, b_maxs, x_filtered_samples, t_filtered_samples = zip(*data)
 a_maxs = array(a_maxs)
 b_maxs = array(b_maxs)
-u_maxs = array([qp_controller.u(x_sample, t_sample) for x_sample, t_sample in zip(x_samples, t_samples)])
+x_filtered_samples = array(x_filtered_samples)
+t_filtered_samples = array(t_filtered_samples)
+u_maxs = array([qp_controller.u(x_sample, t_sample) for x_sample, t_sample in zip(x_filtered_samples, t_filtered_samples)])
 upper_bounds = array([dot(a_max, u_max) + b_max[0] for a_max, b_max, u_max in zip(a_maxs, b_maxs, u_maxs)])
-a_acts = array([lyapunov_function_true.decoupling(x_sample, t_sample) - lyapunov_function.decoupling(x_sample, t_sample) for x_sample, t_sample in zip(x_samples, t_samples)])
-b_acts = array([lyapunov_function_true.drift(x_sample, t_sample) - lyapunov_function.drift(x_sample, t_sample) for x_sample, t_sample in zip(x_samples, t_samples)])
+a_acts = array([lyapunov_function_true.decoupling(x_sample, t_sample) - lyapunov_function.decoupling(x_sample, t_sample) for x_sample, t_sample in zip(x_filtered_samples, t_filtered_samples)])
+b_acts = array([lyapunov_function_true.drift(x_sample, t_sample) - lyapunov_function.drift(x_sample, t_sample) for x_sample, t_sample in zip(x_filtered_samples, t_filtered_samples)])
 acts = array([dot(a_act, u_max) + b_act for a_act, b_act, u_max in zip(a_acts, b_acts, u_maxs)])
 
-savez('./output/qp_data.npz', samples=x_samples, upper_bounds=upper_bounds, acts=acts, xs=x_qps)
-
-# print('Computing bounds for PD controller...')
-# maxs = [pd(x_sample, t_sample) for x_sample, t_sample in zip(x_samples, t_samples)]
-# a_maxs, b_maxs = zip(*maxs)
-# a_maxs = array(a_maxs)
-# b_maxs = array(b_maxs)
-# u_maxs = array([pd_controller.u(x_sample, t_sample) for x_sample, t_sample in zip(x_samples, t_samples)])
-# upper_bounds = array([dot(a_max, u_max) + b_max[0] for a_max, b_max, u_max in zip(a_maxs, b_maxs, u_maxs)])
-#
-# savez('./output/pd_data.npz', samples=x_samples, upper_bounds=upper_bounds, xs=x_pds)
-
-# figure()
-# title('Training data upper bounds', fontsize=16)
-# bounds = scatter(x_samples[:, 0], x_samples[:, 1], c=upper_bounds, cmap=get_cmap('jet'))
-# colorbar(bounds)
-# plot(x_ds[:, 0], x_ds[:, 1], '--k', linewidth=2)
-# xlabel('$\\theta$', fontsize=16)
-# ylabel('$\\dot{\\theta}$', fontsize=16)
-# grid()
-
-# t_ds = t_eval[::subsample_rate]
-# x_ds = array([output.r(t) for t in t_ds])
-# maxs = [opt(x_d, t_d) for x_d, t_d in zip(x_ds, t_ds)]
-# a_maxs, b_maxs = zip(*maxs)
-# a_maxs = array(a_maxs)
-# b_maxs = array(b_maxs)
-# u_maxs = array([total_controller.u(x_d, t_d) for x_d, t_d in zip(x_ds, t_ds)])
-# upper_bounds = array([dot(a_max, u_max) + b_max[0] for a_max, b_max, u_max in zip(a_maxs, b_maxs, u_maxs)])
-#
-# figure()
-# title('Desired trajectory upper bounds', fontsize=16)
-# bounds = scatter(x_ds[:, 0], x_ds[:, 1], c=upper_bounds, cmap=get_cmap('jet'))
-# colorbar(bounds)
-# grid()
+savez('./output/qp_data.npz', samples=x_filtered_samples, upper_bounds=upper_bounds, acts=acts, xs=x_qps)
 
 figure()
 suptitle('Episode data', fontsize=16)
