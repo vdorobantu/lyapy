@@ -14,4 +14,4 @@ from .controller import Controller
 from .linearizing_feedback_controller import LinearizingFeedbackController
 from .pd_controller import PDController
 from .qp_controller import QPController
-from .util import CombinedController, ConstantController, PerturbingController, SaturationController
+from .util import AdaptiveController, CombinedController, ConstantController, PerturbingController, SaturationController

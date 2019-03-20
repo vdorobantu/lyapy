@@ -254,3 +254,26 @@ class SaturationController(Controller):
 
 	def u(self, x, t, update=True):
 		return self.saturate(self.controller.u(x, t, update))
+
+class AdaptiveController(Controller):
+	def __init__(self, controller):
+		Controller.__init__(self, controller.output)
+		self.controller = controller
+
+	def u(self, x, t, update=True):
+		u_0 = self.controller.u(x, t, update=update)
+		if update:
+			self.output.update_params(x, u_0, t)
+		return u_0
+
+	def reset(self):
+		self.output.reset()
+
+	def evaluate_params(self, xs, ts):
+		self.reset()
+
+		def params(x, t):
+			_ = self.u(x, t)
+			return self.output.params
+
+		return array([params(x, t) for x, t in zip(xs, ts)])

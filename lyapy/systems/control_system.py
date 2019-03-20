@@ -53,7 +53,6 @@ class ControlSystem(System):
         us = zeros((T, m))
         ts = zeros((T,))
 
-        # Smoothing
         controller.reset()
 
         for k, (t_0, t_1) in enumerate(zip(t_eval[:-1], t_eval[1:])):
