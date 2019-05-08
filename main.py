@@ -1,4 +1,4 @@
-from numpy import arange, argsort, array, concatenate, cos, cumsum, diag, diff, dot, ones, real, reshape, sin, zeros
+from numpy import arange, argsort, array, concatenate, cos, cumsum, diag, diff, dot, identity, ones, real, reshape, sin, zeros
 from numpy.linalg import eig, solve, norm
 from numpy.random import multivariate_normal, randn
 from scipy.integrate import solve_ivp
@@ -25,6 +25,8 @@ class SystemDynamics(Dynamics):
         N = len(ts)
         xs = zeros((N, self.n))
         us = [None] * (N - 1)
+
+        controller.reset()
 
         xs[0] = x_0
         for j in range(N - 1):
@@ -133,6 +135,9 @@ class Controller:
     def process(self, u):
         return u
 
+    def reset(self):
+        pass
+
 class ConstantController(Controller):
     def __init__(self, dynamics, u_const):
         Controller.__init__(self, dynamics)
@@ -160,9 +165,9 @@ class PDController(Controller):
         return -dot(self.K_p, e_p) - dot(self.K_d, e_d)
 
 class FBLinController(Controller):
-    def __init__(self, fb_lin_dynamics, K):
+    def __init__(self, fb_lin_dynamics, linear_controller):
         Controller.__init__(self, fb_lin_dynamics)
-        self.linear_controller = LinearController(fb_lin_dynamics, K)
+        self.linear_controller = linear_controller
         self.select = fb_lin_dynamics.select
         self.permute = fb_lin_dynamics.permute
 
@@ -178,7 +183,7 @@ class RandomController(Controller):
         self.cov = cov
         self.m, _ = cov.shape
         self.reps = reps
-        self.counter = reps
+        self.counter = None
         self.pert = self.sample()
 
     def sample(self):
@@ -194,6 +199,10 @@ class RandomController(Controller):
     def process(self, u):
         u_nom, u_pert = u
         return u_nom + u_pert
+
+    def reset(self):
+        self.counter = self.reps
+        self.controller.reset()
 
 class QuadraticCLF(Dynamics):
     def __init__(self, dynamics, P):
@@ -245,6 +254,36 @@ class LQRController(Controller):
         lyap = AffineQuadCLF.build_care(affine_linearizable_dynamics, Q, R)
         return LQRController(affine_linearizable_dynamics, lyap.P, R)
 
+class MinNormController(Controller):
+    def __init__(self, affine_dynamics, affine_quad_clf, Q, R, sigma=0):
+        Controller.__init__(self, affine_dynamics)
+        self.lyap = affine_quad_clf
+        self.Q = Q
+        self.R = R
+        self.sigma = sigma
+        self.m = len(R)
+        self.u_prev = None
+
+    def eval(self, x, t):
+        sigma_2 = self.sigma ** 2
+        R_sigma = self.R + sigma_2 * identity(self.m)
+        drift = self.lyap.drift(x, t)
+        act = self.lyap.act(x, t)
+        z = self.dynamics.eval(x, t)
+        smooth = sigma_2 * dot(act, solve(R_sigma, self.u_prev))
+        req = -dot(z, dot(self.Q, z))
+        lambda_cons = max(0, 2 * (smooth + drift - req) / dot(act, solve(R_sigma, act)))
+        u = -solve(R_sigma, lambda_cons * act - 2 * sigma_2 * self.u_prev) / 2
+        self.u_prev = u
+        return u
+
+    def build(affine_linearizable_dynamics, Q, R, sigma=0):
+        lyap = AffineQuadCLF.build_care(affine_linearizable_dynamics, Q, R)
+        return MinNormController(affine_linearizable_dynamics, lyap, Q, R, sigma)
+
+    def reset(self):
+        self.u_prev = zeros(self.m)
+
 def rand_orthogonal(n):
     M = randn(n, n)
     M = dot(M.T, M)
@@ -285,10 +324,10 @@ def compare_unstable(A, A_hat):
 
 
 def dcm_from_euler(rot_order):
-    
+
     def dcm(xi):
         return(dot(elem_euler_rot(rot_order[2], xi[2]), dot(elem_euler_rot(rot_order[1], xi[1]), elem_euler_rot(rot_order[0], xi[0]))))
-     
+
     return dcm
 
 def elem_euler_rot(axis,angle):
@@ -296,31 +335,31 @@ def elem_euler_rot(axis,angle):
     rot_1 = array([[1, 0, 0], [0, cos(angle), sin(angle)], [0, -sin(angle), cos(angle)]])
     rot_2 = array([[cos(angle), 0, -sin(angle)], [0, 1, 0], [sin(angle), 0, cos(angle)]])
     rot_3 = array([[cos(angle), sin(angle), 0], [-sin(angle), cos(angle), 0], [0, 0, 1]])
-    
+
     dcm_tensor = array([rot_1, rot_2, rot_3])
-    
+
     return dcm_tensor[axis-1]
 
 def euler_to_ang(rot_order):
-    
+
     def T(xi):
         col1 = dot(elem_euler_rot(rot_order[2], xi[2]), dot(elem_euler_rot(rot_order[1], xi[1]), evec(3, rot_order[0]-1)))
         col2 = dot(elem_euler_rot(rot_order[2], xi[2]), evec(3, rot_order[1]-1))
         col3 = evec(3, rot_order[2]-1)
-    
+
         return array([col1, col2, col3]).T
-    
+
     return T
 
 def evec(length,idx):
-    
+
     v = zeros(length)
     v[idx] = 1
-    
+
     return v
 
 def ss_cross(v):
-    
+
     v_cross = array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
-    
+
     return v_cross
