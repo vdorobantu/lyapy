@@ -1,4 +1,4 @@
-from numpy import arange, argsort, array, concatenate, cumsum, diag, diff, dot, ones, real, reshape, zeros
+from numpy import arange, argsort, array, concatenate, cos, cumsum, diag, diff, dot, ones, real, reshape, sin, zeros
 from numpy.linalg import eig, solve, norm
 from numpy.random import multivariate_normal, randn
 from scipy.integrate import solve_ivp
@@ -132,6 +132,13 @@ class Controller:
 
     def process(self, u):
         return u
+
+class ConstantController(Controller):
+    def __init__(self, dynamics, u_const):
+        Controller.__init__(self, dynamics)
+        self.u_const = u_const
+    def eval(self, x, t):
+        return self.u_const
 
 class LinearController(Controller):
     def __init__(self, affine_dynamics, K):
@@ -275,3 +282,45 @@ def compare_unstable(A, A_hat):
     A_hat_unstable = matrix_select(solve(U, dot(A_hat, U)), idxs)
 
     return norm(A_unstable - A_hat_unstable)
+
+
+def dcm_from_euler(rot_order):
+    
+    def dcm(xi):
+        return(dot(elem_euler_rot(rot_order[2], xi[2]), dot(elem_euler_rot(rot_order[1], xi[1]), elem_euler_rot(rot_order[0], xi[0]))))
+     
+    return dcm
+
+def elem_euler_rot(axis,angle):
+
+    rot_1 = array([[1, 0, 0], [0, cos(angle), sin(angle)], [0, -sin(angle), cos(angle)]])
+    rot_2 = array([[cos(angle), 0, -sin(angle)], [0, 1, 0], [sin(angle), 0, cos(angle)]])
+    rot_3 = array([[cos(angle), sin(angle), 0], [-sin(angle), cos(angle), 0], [0, 0, 1]])
+    
+    dcm_tensor = array([rot_1, rot_2, rot_3])
+    
+    return dcm_tensor[axis-1]
+
+def euler_to_ang(rot_order):
+    
+    def T(xi):
+        col1 = dot(elem_euler_rot(rot_order[2], xi[2]), dot(elem_euler_rot(rot_order[1], xi[1]), evec(3, rot_order[0]-1)))
+        col2 = dot(elem_euler_rot(rot_order[2], xi[2]), evec(3, rot_order[1]-1))
+        col3 = evec(3, rot_order[2]-1)
+    
+        return array([col1, col2, col3]).T
+    
+    return T
+
+def evec(length,idx):
+    
+    v = zeros(length)
+    v[idx] = 1
+    
+    return v
+
+def ss_cross(v):
+    
+    v_cross = array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
+    
+    return v_cross
