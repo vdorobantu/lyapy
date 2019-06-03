@@ -255,34 +255,25 @@ class LQRController(Controller):
         return LQRController(affine_linearizable_dynamics, lyap.P, R)
 
 class MinNormController(Controller):
-    def __init__(self, affine_dynamics, affine_quad_clf, Q, R, sigma=0):
+    def __init__(self, affine_dynamics, affine_quad_clf, Q, R):
         Controller.__init__(self, affine_dynamics)
         self.lyap = affine_quad_clf
         self.Q = Q
         self.R = R
-        self.sigma = sigma
-        self.m = len(R)
-        self.u_prev = None
 
     def eval(self, x, t):
-        sigma_2 = self.sigma ** 2
-        R_sigma = self.R + sigma_2 * identity(self.m)
         drift = self.lyap.drift(x, t)
         act = self.lyap.act(x, t)
         z = self.dynamics.eval(x, t)
-        smooth = sigma_2 * dot(act, solve(R_sigma, self.u_prev))
-        req = -dot(z, dot(self.Q, z))
-        lambda_cons = max(0, 2 * (smooth + drift - req) / dot(act, solve(R_sigma, act)))
-        u = -solve(R_sigma, lambda_cons * act - 2 * sigma_2 * self.u_prev) / 2
-        self.u_prev = u
+        bound = -dot(z, dot(self.Q, z))
+        lambda_cons = 2 * (drift - bound) / (dot(act, solve(self.R, act)))
+        lambda_cons = max(0, lambda_cons)
+        u = -lambda_cons * solve(self.R, act) / 2
         return u
 
-    def build(affine_linearizable_dynamics, Q, R, sigma=0):
+    def build(affine_linearizable_dynamics, Q, R):
         lyap = AffineQuadCLF.build_care(affine_linearizable_dynamics, Q, R)
-        return MinNormController(affine_linearizable_dynamics, lyap, Q, R, sigma)
-
-    def reset(self):
-        self.u_prev = zeros(self.m)
+        return MinNormController(affine_linearizable_dynamics, lyap, Q, R)
 
 def rand_orthogonal(n):
     M = randn(n, n)
