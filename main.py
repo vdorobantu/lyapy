@@ -1,4 +1,4 @@
-from numpy import arange, argsort, array, concatenate, cos, cumsum, diag, diff, dot, identity, ones, real, reshape, sin, zeros
+from numpy import arange, argsort, array, concatenate, cos, cumsum, diag, diff, dot, identity, ones, real, reshape, sin, transpose, zeros
 from numpy.linalg import eig, solve, norm
 from numpy.random import multivariate_normal, randn
 from scipy.integrate import solve_ivp
@@ -325,32 +325,32 @@ def dcm_from_euler(rot_order):
         layer2 = dot(elem_euler_rot(rot_order[2], xi[2]), dot(d_elem_euler_rot(rot_order[1], xi[1]), elem_euler_rot(rot_order[0], xi[0])))
         layer3 = dot(d_elem_euler_rot(rot_order[2], xi[2]), dot(elem_euler_rot(rot_order[1], xi[1]), elem_euler_rot(rot_order[0], xi[0])))
         
-        return array([layer1, layer2, layer3])
+        return transpose(array([layer1, layer2, layer3]), (1, 2, 0))
     
     def hessdcm(xi):
     
         layer1 = dot(elem_euler_rot(rot_order[2], xi[2]), dot(elem_euler_rot(rot_order[1], xi[1]), dd_elem_euler_rot(rot_order[0], xi[0])))
         layer2 = dot(elem_euler_rot(rot_order[2], xi[2]), dot(d_elem_euler_rot(rot_order[1], xi[1]), d_elem_euler_rot(rot_order[0], xi[0])))
         layer3 = dot(d_elem_euler_rot(rot_order[2], xi[2]), dot(elem_euler_rot(rot_order[1], xi[1]), d_elem_euler_rot(rot_order[0], xi[0])))
-        cut1 = array([layer1, layer2, layer3])
+        cut1 = transpose(array([layer1, layer2, layer3]), (1, 2, 0))
     
         layer1 = dot(elem_euler_rot(rot_order[2], xi[2]), dot(d_elem_euler_rot(rot_order[1], xi[1]), d_elem_euler_rot(rot_order[0], xi[0])))
         layer2 = dot(elem_euler_rot(rot_order[2], xi[2]), dot(dd_elem_euler_rot(rot_order[1], xi[1]), elem_euler_rot(rot_order[0], xi[0])))
         layer3 = dot(d_elem_euler_rot(rot_order[2], xi[2]), dot(d_elem_euler_rot(rot_order[1], xi[1]), elem_euler_rot(rot_order[0], xi[0])))
-        cut2 = array([layer1, layer2, layer3])
+        cut2 = transpose(array([layer1, layer2, layer3]), (1, 2, 0))
     
         layer1 = dot(d_elem_euler_rot(rot_order[2], xi[2]), dot(elem_euler_rot(rot_order[1], xi[1]), d_elem_euler_rot(rot_order[0], xi[0])))
         layer2 = dot(d_elem_euler_rot(rot_order[2], xi[2]), dot(d_elem_euler_rot(rot_order[1], xi[1]), elem_euler_rot(rot_order[0], xi[0])))
         layer3 = dot(dd_elem_euler_rot(rot_order[2], xi[2]), dot(elem_euler_rot(rot_order[1], xi[1]), elem_euler_rot(rot_order[0], xi[0])))
-        cut3 = array([layer1, layer2, layer3])
+        cut3 = transpose(array([layer1, layer2, layer3]), (1, 2, 0))
     
-        return array([cut1, cut2, cut3])
+        return transpose(array([cut1, cut2, cut3]), (1, 2, 3, 0))
     
     
     return dcm, graddcm, hessdcm
 
 def elem_euler_rot(axis,angle):
-
+    
     rot_1 = array([[1, 0, 0], [0, cos(angle), sin(angle)], [0, -sin(angle), cos(angle)]])
     rot_2 = array([[cos(angle), 0, -sin(angle)], [0, 1, 0], [sin(angle), 0, cos(angle)]])
     rot_3 = array([[cos(angle), sin(angle), 0], [-sin(angle), cos(angle), 0], [0, 0, 1]])
@@ -389,17 +389,17 @@ def euler_to_ang(rot_order):
     def gradT(xi):
         layer1 = zeros((3,3))
         
-        l2_c1 = dot(elem_euler(rot_order[2], xi[2]), dot(d_elem_euler(rot_order[1], xi[1]), evec(3, rot_order[0]-1)))
+        l2_c1 = dot(elem_euler_rot(rot_order[2], xi[2]), dot(d_elem_euler_rot(rot_order[1], xi[1]), evec(3, rot_order[0]-1)))
         l2_c2 = zeros(3)
         l2_c3 = zeros(3)
         layer2 = array([l2_c1, l2_c2, l2_c3]).T 
         
-        l3_c1 = dot(d_elem_euler(rot_order[2], xi[2]), dot(elem_euler(rot_order[1], xi[1]), evec(3, rot_order[0]-1)))
+        l3_c1 = dot(d_elem_euler_rot(rot_order[2], xi[2]), dot(elem_euler_rot(rot_order[1], xi[1]), evec(3, rot_order[0]-1)))
         l3_c2 = dot(d_elem_euler_rot(rot_order[2], xi[2]), evec(3, rot_order[1]-1))
         l3_c3 = zeros(3)
         layer3 = array([l3_c1, l3_c2, l3_c3]).T
         
-        return array([layer1, layer2, layer3])
+        return transpose(array([layer1, layer2, layer3]), (1, 2, 0))
     
     return T, gradT
 
