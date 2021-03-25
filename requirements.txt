@@ -21,7 +21,7 @@ osqp==0.5.0
 protobuf==3.6.1
 pyparsing==2.3.1
 python-dateutil==2.7.5
-PyYAML==3.13
+PyYAML==5.4
 scipy==1.2.0
 scs==2.0.2
 six==1.12.0
